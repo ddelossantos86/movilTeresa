@@ -4,16 +4,20 @@ import { onError } from '@apollo/client/link/error';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// IP de tu Mac en la red local
-// IMPORTANTE: Si estás usando un dispositivo físico, asegúrate de que 
-// tu celular y tu Mac están en la misma red WiFi
+// Configuración de URL de API según entorno
+// DESARROLLO: IP local (cambiar según tu red)
+// PRODUCCIÓN: IP del servidor DonWeb
 
+const IS_PRODUCTION = false; // Cambiar a true para compilar versión de producción
 const LOCAL_IP = '10.1.142.88';
-// const LOCAL_IP = '192.168.68.103';
+const PRODUCTION_IP = '149.50.150.151';
 
-// Usar SIEMPRE la IP local (funciona para emuladores y dispositivos físicos)
-const API_URL = `http://${LOCAL_IP}:3000/graphql`;
+// Usar IP de producción o desarrollo según configuración
+const API_URL = IS_PRODUCTION 
+  ? `http://${PRODUCTION_IP}:3000/graphql`
+  : `http://${LOCAL_IP}:3000/graphql`;
 
+console.log('🌐 Entorno:', IS_PRODUCTION ? 'PRODUCCIÓN' : 'DESARROLLO');
 console.log('🌐 API_URL configurada:', API_URL);
 console.log('📱 Platform:', Platform.OS);
 
