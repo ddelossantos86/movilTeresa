@@ -1,0 +1,1389 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, SafeAreaView, ScrollView, RefreshControl, StatusBar, Modal, TouchableOpacity, Animated, Platform } from 'react-native';
+import { ApplicationProvider, Layout, Text, Input, Button, Card, Spinner, Divider, Icon, TopNavigation, TopNavigationAction, IconRegistry } from '@ui-kitten/components';
+import { EvaIconsPack } from '@ui-kitten/eva-icons';
+import * as eva from '@eva-design/eva';
+import { ApolloProvider, useMutation, useQuery } from '@apollo/client';
+import { apolloClient } from './src/config/apollo';
+import { LOGIN_TUTOR, GET_MENSAJES_TUTOR, MARCAR_MENSAJE_LEIDO, GET_ALUMNOS_TUTOR, GET_ASISTENCIAS } from './src/graphql/queries';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import TeresaLogo from './assets/TeresaLogo';
+import { BlurView } from '@react-native-community/blur';
+
+// 🎨 TEMA CLARO VIBRANTE - Colores alegres y modernos
+const customTheme = {
+  ...eva.light,
+  // Turquesa vibrante como color principal
+  'color-primary-100': '#C2F5EC',
+  'color-primary-200': '#8AEBDA',
+  'color-primary-300': '#52E0C8',
+  'color-primary-400': '#1AD6B6',
+  'color-primary-500': '#00BFA5', // Turquesa principal
+  'color-primary-600': '#00A58D',
+  'color-primary-700': '#008B75',
+  'color-primary-800': '#00715D',
+  'color-primary-900': '#005745',
+  
+  // Fondos súper claros y limpios
+  'color-basic-100': '#FFFFFF',
+  'color-basic-200': '#F8FAFB',
+  'color-basic-300': '#EFF3F6',
+  'color-basic-400': '#E6EBF0',
+  'color-basic-500': '#C5CEE0',
+  'color-basic-600': '#8F9BB3',
+  
+  // Colores de acento vibrantes
+  'color-success-100': '#D4F8E8',
+  'color-success-500': '#00E096', // Verde brillante
+  'color-success-700': '#00B377',
+  
+  'color-warning-100': '#FFF3D6',
+  'color-warning-500': '#FFB020', // Naranja cálido
+  'color-warning-700': '#E69500',
+  
+  'color-danger-100': '#FFECEC',
+  'color-danger-500': '#FF3D71', // Rojo coral
+  'color-danger-700': '#DB2C5E',
+  
+  'color-info-100': '#D6EDFF',
+  'color-info-500': '#0095FF', // Azul cielo brillante
+  'color-info-700': '#006FD6',
+};
+
+// 🔐 LOGIN
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [documento, setDocumento] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginTutor, { loading }] = useMutation(LOGIN_TUTOR);
+
+  const handleLogin = async () => {
+    try {
+      const { data } = await loginTutor({ 
+        variables: { 
+          input: { 
+            documento, 
+            password 
+          } 
+        } 
+      });
+      if (data?.loginTutorPassword?.token) {
+        await AsyncStorage.setItem('authToken', data.loginTutorPassword.token);
+        // El campo se llama 'user' no 'tutor'
+        if (data.loginTutorPassword.user) {
+          await AsyncStorage.setItem('tutorData', JSON.stringify(data.loginTutorPassword.user));
+        }
+        onLogin();
+      }
+    } catch (error: any) {
+      alert(error.message || 'Error en el login');
+    }
+  };
+
+  const PersonIcon = (props: any) => <Icon {...props} name="person-outline" />;
+  const LockIcon = (props: any) => <Icon {...props} name="lock-outline" />;
+
+  return (
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <Layout style={{ flex: 1, paddingTop: StatusBar.currentHeight || 44 }}>
+        <ScrollView 
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ alignItems: 'center', marginBottom: 40 }}>
+            {/* Logo SVG de TERESA */}
+            <TeresaLogo size={140} />
+         
+          </View>
+
+          <Card disabled style={{ 
+            marginBottom: 24, 
+            borderRadius: 20, 
+            backgroundColor: '#F8FAFB',
+            borderWidth: 1,
+            borderColor: '#E6EBF0'
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+             
+              <View>
+                <Text category="h6" style={{ marginBottom: 4, color: '#00BFA5', fontWeight: 'bold' }}>Bienvenido!</Text>
+                <Text category="p2" appearance="hint">Ingresá tus credenciales</Text>
+              </View>
+            </View>
+          </Card>
+
+      <Input
+        placeholder="Documento"
+        value={documento}
+        onChangeText={setDocumento}
+        accessoryLeft={PersonIcon}
+        keyboardType="numeric"
+        size="large"
+        style={{ marginBottom: 16, borderRadius: 12 }}
+      />
+
+      <Input
+        placeholder="Contraseña"
+        value={password}
+        onChangeText={setPassword}
+        accessoryLeft={LockIcon}
+        secureTextEntry
+        size="large"
+        style={{ marginBottom: 24, borderRadius: 12 }}
+      />
+
+      <Button 
+        onPress={handleLogin} 
+        disabled={loading || !documento || !password} 
+        size="large"
+        style={{ borderRadius: 12 }}
+      >
+        {loading ? 'Ingresando...' : 'Ingresar'}
+      </Button>
+        </ScrollView>
+      </Layout>
+    </>
+  );
+}
+
+// 🏠 HOME
+function HomeScreen({ onLogout }: { onLogout: () => void }) {
+  const [activeTab, setActiveTab] = useState('mensajes');
+  const [mensajes, setMensajes] = useState<any[]>([]);
+  const mensajesNoLeidos = mensajes.filter((m: any) => !m.leido).length;
+  
+  // Animaciones para efecto blur
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const blurOpacity = useRef(new Animated.Value(0)).current;
+
+  const handleTabChange = (newTab: string) => {
+    if (newTab === activeTab) return;
+    
+    setIsTransitioning(true);
+    
+    // Mostrar blur
+    Animated.timing(blurOpacity, {
+      toValue: 1,
+      duration: 50,
+      useNativeDriver: true,
+    }).start(() => {
+      // Cambiar tab mientras está borroso
+      setActiveTab(newTab);
+      
+      // Quitar blur después de un pequeño delay
+      setTimeout(() => {
+        Animated.timing(blurOpacity, {
+          toValue: 0,
+          duration: 50,
+          useNativeDriver: true,
+        }).start(() => {
+          setIsTransitioning(false);
+        });
+      }, 50);
+    });
+  };
+
+  const LogoutIcon = (props: any) => <Icon {...props} name="log-out-outline" />;
+
+  return (
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <SafeAreaView style={{ flex: 1, paddingTop: StatusBar.currentHeight || 0 }}>
+        <TopNavigation
+          title="barra"
+          alignment="center"
+          accessoryRight={() => <TopNavigationAction icon={LogoutIcon} onPress={onLogout} />}
+          style={{ backgroundColor: '#FFFFFF' }}
+        />
+        <Divider />
+
+      <View style={{ flex: 1, position: 'relative' }}>
+        {activeTab === 'mensajes' && <MensajesTab onMensajesUpdate={setMensajes} />}
+        {activeTab === 'dashboard' && <PlaceholderTab icon="home-outline" title="Dashboard" />}
+        {activeTab === 'asistencias' && <AsistenciasTab />}
+        {activeTab === 'calificaciones' && <PlaceholderTab icon="bar-chart-outline" title="Calificaciones" />}
+        
+        {/* Blur overlay durante transición */}
+        {isTransitioning && Platform.OS === 'ios' && (
+          <Animated.View style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0,
+            opacity: blurOpacity
+          }}>
+            <BlurView
+              style={{ flex: 1 }}
+              blurType="light"
+              blurAmount={15}
+              reducedTransparencyFallbackColor="white"
+            />
+          </Animated.View>
+        )}
+        
+        {/* Fallback para Android - overlay blanco translúcido */}
+        {isTransitioning && Platform.OS === 'android' && (
+          <Animated.View style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0,
+            backgroundColor: 'rgba(255, 255, 255, 0.85)',
+            opacity: blurOpacity
+          }} />
+        )}
+      </View>
+
+      {/* TAB BAR */}
+      <Layout level="4" style={{ backgroundColor: '#000000ff', flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: 'rgba(0, 0, 0, 0.05)' }}>
+        <Button
+          appearance={activeTab === 'dashboard' ? 'filled' : 'ghost'}
+          accessoryLeft={activeTab === 'dashboard' ? undefined : (props) => <Icon {...props} name="home-outline" width={26} height={26} />}
+          onPress={() => handleTabChange('dashboard')}
+          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+          size="small"
+        >
+          {activeTab === 'dashboard' ? 'Inicio' : ''}
+        </Button>
+        <Button
+          appearance={activeTab === 'mensajes' ? 'filled' : 'ghost'}
+          accessoryLeft={activeTab === 'mensajes' ? undefined : (props) => <Icon {...props} name="email-outline" width={26} height={26} />}
+          onPress={() => handleTabChange('mensajes')}
+          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+          size="small"
+        >
+          {activeTab === 'mensajes' ? (mensajesNoLeidos > 0 ? `Mensajes (${mensajesNoLeidos})` : 'Mensajes') : ''}
+        </Button>
+        <Button
+          appearance={activeTab === 'asistencias' ? 'filled' : 'ghost'}
+          accessoryLeft={activeTab === 'asistencias' ? undefined : (props) => <Icon {...props} name="calendar-outline" width={26} height={26} />}
+          onPress={() => handleTabChange('asistencias')}
+          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+          size="small"
+        >
+          {activeTab === 'asistencias' ? 'Asist.' : ''}
+        </Button>
+        <Button
+          appearance={activeTab === 'calificaciones' ? 'filled' : 'ghost'}
+          accessoryLeft={activeTab === 'calificaciones' ? undefined : (props) => <Icon {...props} name="bar-chart-outline" width={26} height={26} />}
+          onPress={() => handleTabChange('calificaciones')}
+          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+          size="small"
+        >
+          {activeTab === 'calificaciones' ? 'Notas' : ''}
+        </Button>
+      </Layout>
+      </SafeAreaView>
+    </>
+  );
+}
+
+// 📧 MENSAJES
+function MensajesTab({ onMensajesUpdate }: { onMensajesUpdate: (mensajes: any[]) => void }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedMensaje, setSelectedMensaje] = useState<any>(null);
+  const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(null);
+  
+  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
+  const { data, loading, refetch } = useQuery(GET_MENSAJES_TUTOR, {
+    variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {}
+  });
+  const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
+
+  const alumnos = alumnosData?.alumnosTutor || [];
+  const mensajes = data?.mensajesTutor || [];
+  
+  // Función para obtener los alumnos por destinatarioIds
+  const getAlumnosByDestinatarioIds = (destinatarioIds: string[]) => {
+    if (!destinatarioIds || destinatarioIds.length === 0) {
+      console.log('❌ No hay destinatarioIds');
+      return [];
+    }
+    
+    console.log('🔍 Buscando alumnos con destinatarioIds:', destinatarioIds);
+    console.log('📋 Alumnos disponibles:', alumnos.map((a: any) => ({ id: a.id, nombre: `${a.nombre} ${a.apellido}` })));
+    
+    // Buscar todos los alumnos que coincidan con los destinatarioIds
+    const alumnosEncontrados = alumnos.filter((alumno: any) => 
+      destinatarioIds.includes(alumno.id)
+    );
+    
+    console.log('✅ Alumnos encontrados:', alumnosEncontrados.length);
+    if (alumnosEncontrados.length > 0) {
+      console.log('   Nombres:', alumnosEncontrados.map((a: any) => `${a.nombre} ${a.apellido}`).join(', '));
+    }
+    
+    return alumnosEncontrados;
+  };
+  
+  // Función helper para obtener el primer alumno (para mostrar en la UI)
+  const getAlumnoByDestinatarioId = (mensaje: any) => {
+    const alumnosDelMensaje = getAlumnosByDestinatarioIds(mensaje.destinatarioIds || []);
+    return alumnosDelMensaje.length > 0 ? alumnosDelMensaje[0] : null;
+  };
+  
+  // Obtener el alumno seleccionado
+  const alumnoSeleccionado = selectedAlumnoId 
+    ? alumnos.find((a: any) => a.id === selectedAlumnoId) 
+    : null;
+
+  useEffect(() => {
+    if (mensajes.length > 0) {
+      onMensajesUpdate(mensajes);
+    }
+  }, [mensajes.length]);
+
+  const handleAbrirMensaje = async (mensaje: any) => {
+    setSelectedMensaje(mensaje);
+    
+    // Si el mensaje no está leído, marcarlo como leído
+    if (!mensaje.leido) {
+      try {
+        await marcarLeido({
+          variables: { mensajeId: mensaje.id },
+          // Actualizar el cache para reflejar el cambio inmediatamente
+          update: (cache, { data }) => {
+            if (data?.marcarMensajeComoLeido) {
+              cache.modify({
+                fields: {
+                  mensajesTutor(existingMensajes = []) {
+                    return existingMensajes.map((mensajeRef: any) => {
+                      if (mensajeRef.__ref === `MensajeGeneral:${mensaje.id}`) {
+                        return { ...mensajeRef, leido: true };
+                      }
+                      return mensajeRef;
+                    });
+                  }
+                }
+              });
+            }
+          }
+        });
+        // Refrescar la lista
+        await refetch();
+      } catch (error) {
+        console.error('Error al marcar mensaje como leído:', error);
+      }
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Sin fecha';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'Fecha inválida';
+      return date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (error) {
+      return 'Error en fecha';
+    }
+  };
+
+  const formatTipo = (tipo: string) => {
+    if (!tipo) return '';
+    return tipo.replace(/_/g, ' ');
+  };
+
+  if (loading && !refreshing) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Spinner size="giant" />
+        <Text category="s1" appearance="hint" style={{ marginTop: 16 }}>Cargando...</Text>
+      </Layout>
+    );
+  }
+
+  return (
+    <>
+      <Layout style={{ flex: 1 }}>
+        {/* Selector de alumno */}
+        {alumnos.length > 1 && (
+          <View style={{ padding: 16, paddingBottom: 0 }}>
+            {/* <Text category="label" appearance="hint" style={{ marginBottom: 8 }}>
+              Filtrar mensajes por alumno:
+            </Text> */}
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 8 }}
+            >
+              <Button
+                size="small"
+                appearance={selectedAlumnoId === null ? 'filled' : 'outline'}
+                onPress={() => setSelectedAlumnoId(null)}
+                style={{ marginRight: 8, borderRadius: 20 }}
+              >
+                Todos
+              </Button>
+              {alumnos.map((alumno: any) => (
+                <Button
+                  key={alumno.id}
+                  size="small"
+                  appearance={selectedAlumnoId === alumno.id ? 'filled' : 'outline'}
+                  onPress={() => setSelectedAlumnoId(alumno.id)}
+                  style={{ marginRight: 8, borderRadius: 20 }}
+                >
+                  {`${alumno.nombre} ${alumno.apellido}`}
+                </Button>
+              ))}
+            </ScrollView>
+            <Divider style={{ marginTop: 8 }} />
+          </View>
+        )}
+        
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {mensajes.length === 0 ? (
+            <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <View style={{ 
+                  width: 100, 
+                  height: 100, 
+                  borderRadius: 50, 
+                  backgroundColor: '#E6F7F4', 
+                  justifyContent: 'center', 
+                  alignItems: 'center',
+                  marginBottom: 20
+                }}>
+                  <Icon name="email-outline" style={{ width: 50, height: 50 }} fill="#00BFA5" />
+                </View>
+                <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>No hay mensajes</Text>
+                <Text appearance="hint">
+                  {selectedAlumnoId ? 'No hay mensajes para este alumno' : 'Los mensajes aparecerán aquí'}
+                </Text>
+              </View>
+            </Card>
+          ) : (
+          mensajes.map((mensaje: any, index: number) => {
+            const alumnoDelMensaje = getAlumnoByDestinatarioId(mensaje);
+            
+            return (
+            <Card
+              key={mensaje.id || index}
+              style={{ 
+                marginBottom: 16, 
+                borderRadius: 16, 
+                backgroundColor: '#FFFFFF',
+                borderWidth: 1,
+                borderColor: mensaje.leido ? '#E6EBF0' : '#00BFA5',
+                shadowColor: '#00BFA5',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: mensaje.leido ? 0 : 0.1,
+                shadowRadius: 8,
+                elevation: mensaje.leido ? 1 : 3
+              }}
+              onPress={() => handleAbrirMensaje(mensaje)}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text category="h6" numberOfLines={1} style={{ color: '#1A1F36', fontWeight: '700' }}>
+                    {mensaje.titulo || 'Sin título'}
+                  </Text>
+                  
+                  {/* Indicador del alumno */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                    <Icon name="person-outline" style={{ width: 14, height: 14, marginRight: 4 }} fill="#00BFA5" />
+                    <Text category="c1" style={{ color: '#00BFA5', fontWeight: '600' }}>
+                      {alumnoDelMensaje 
+                        ? `${alumnoDelMensaje.nombre} ${alumnoDelMensaje.apellido}` 
+                        : 'Cargando alumno...'}
+                    </Text>
+                  </View>
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, flexWrap: 'wrap', gap: 6 }}>
+                    {mensaje.tipo && (
+                      <View style={{ 
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        backgroundColor: 
+                          mensaje.tipo === 'GENERAL' ? '#E6F7FF' :
+                          mensaje.tipo === 'ACADEMICO' ? '#F0E6FF' :
+                          mensaje.tipo === 'ADMINISTRATIVO' ? '#FFE6E6' :
+                          mensaje.tipo === 'EVENTO' ? '#E6FFE6' :
+                          '#FFF9E6',
+                        borderRadius: 8
+                      }}>
+                        <Text style={{ 
+                          color: 
+                            mensaje.tipo === 'GENERAL' ? '#0369A1' :
+                            mensaje.tipo === 'ACADEMICO' ? '#6D28D9' :
+                            mensaje.tipo === 'ADMINISTRATIVO' ? '#B91C1C' :
+                            mensaje.tipo === 'EVENTO' ? '#047857' :
+                            '#A67C00',
+                          fontWeight: '600', 
+                          fontSize: 10 
+                        }}>
+                          {formatTipo(mensaje.tipo)}
+                        </Text>
+                      </View>
+                    )}
+                    {!mensaje.leido && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{ 
+                          width: 8, 
+                          height: 8, 
+                          borderRadius: 4, 
+                          backgroundColor: '#00E096', 
+                          marginRight: 4 
+                        }} />
+                        <Text category="c2" style={{ color: '#00BFA5', fontWeight: 'bold', fontSize: 10 }}>
+                          NUEVO
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View style={{ 
+                  paddingHorizontal: 8, 
+                  paddingVertical: 4, 
+                  backgroundColor: '#F8FAFB', 
+                  borderRadius: 8 
+                }}>
+                  <Text category="c1" appearance="hint" style={{ fontSize: 11 }}>
+                    {formatDate(mensaje.publicadoEn || mensaje.creadoEn)}
+                  </Text>
+                </View>
+              </View>
+              <Text numberOfLines={2} appearance="hint" category="p2" style={{ lineHeight: 20 }}>
+                {mensaje.contenido || 'Sin contenido'}
+              </Text>
+            </Card>
+            );
+          })
+        )}
+        </ScrollView>
+      </Layout>
+
+      {selectedMensaje && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setSelectedMensaje(null)}
+        >
+          <View 
+            style={{ 
+              flex: 1, 
+              backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              padding: 20
+            }}
+          >
+            <TouchableOpacity 
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              activeOpacity={1}
+              onPress={() => setSelectedMensaje(null)}
+            />
+            
+            <View style={{ width: '100%', maxWidth: 450, zIndex: 1 }}>
+              <Card 
+                disabled 
+                style={{ 
+                  borderRadius: 24,
+                  backgroundColor: '#FFFFFF',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 12,
+                  elevation: 8
+                }}
+              >
+                <ScrollView 
+                  showsVerticalScrollIndicator={false}
+                  style={{ maxHeight: 650 }}
+                  contentContainerStyle={{ padding: 16 }}
+                  nestedScrollEnabled={true}
+                >
+                  <View style={{ marginBottom: 16 }}>
+                    <Text 
+                      style={{ 
+                        marginBottom: 12, 
+                        fontSize: 20, 
+                        fontWeight: '700', 
+                        color: '#1A1F36',
+                        lineHeight: 28
+                      }}
+                    >
+                      {selectedMensaje.titulo || 'Sin título'}
+                    </Text>
+                    
+                    {(() => {
+                      const alumnoDelMensajeModal = getAlumnoByDestinatarioId(selectedMensaje);
+                      return alumnoDelMensajeModal && (
+                        <View style={{ 
+                          flexDirection: 'row', 
+                          alignItems: 'center', 
+                          marginBottom: 12,
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          backgroundColor: '#E6F7F4',
+                          borderRadius: 10,
+                          borderLeftWidth: 3,
+                          borderLeftColor: '#00BFA5'
+                        }}>
+                          <Icon name="person-outline" style={{ width: 18, height: 18, marginRight: 8 }} fill="#00BFA5" />
+                          <Text style={{ color: '#00BFA5', fontWeight: '700', fontSize: 14 }}>
+                            Para: {alumnoDelMensajeModal.nombre} {alumnoDelMensajeModal.apellido}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                    
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, gap: 8 }}>
+                      {selectedMensaje.tipo && (
+                        <View style={{ 
+                          flexDirection: 'row', 
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          backgroundColor: 
+                            selectedMensaje.tipo === 'GENERAL' ? '#E6F7FF' :
+                            selectedMensaje.tipo === 'ACADEMICO' ? '#F0E6FF' :
+                            selectedMensaje.tipo === 'ADMINISTRATIVO' ? '#FFE6E6' :
+                            selectedMensaje.tipo === 'EVENTO' ? '#E6FFE6' :
+                            '#FFF9E6',
+                          borderRadius: 10,
+                          alignSelf: 'flex-start'
+                        }}>
+                          <Icon 
+                            name={
+                              selectedMensaje.tipo === 'GENERAL' ? 'bell-outline' :
+                              selectedMensaje.tipo === 'ACADEMICO' ? 'book-outline' :
+                              selectedMensaje.tipo === 'ADMINISTRATIVO' ? 'file-text-outline' :
+                              selectedMensaje.tipo === 'EVENTO' ? 'calendar-outline' :
+                              'info-outline'
+                            }
+                            style={{ width: 14, height: 14, marginRight: 6 }} 
+                            fill={
+                              selectedMensaje.tipo === 'GENERAL' ? '#0095FF' :
+                              selectedMensaje.tipo === 'ACADEMICO' ? '#8B5CF6' :
+                              selectedMensaje.tipo === 'ADMINISTRATIVO' ? '#EF4444' :
+                              selectedMensaje.tipo === 'EVENTO' ? '#10B981' :
+                              '#FFB020'
+                            }
+                          />
+                          <Text style={{ 
+                            color: 
+                              selectedMensaje.tipo === 'GENERAL' ? '#0369A1' :
+                              selectedMensaje.tipo === 'ACADEMICO' ? '#6D28D9' :
+                              selectedMensaje.tipo === 'ADMINISTRATIVO' ? '#B91C1C' :
+                              selectedMensaje.tipo === 'EVENTO' ? '#047857' :
+                              '#A67C00',
+                            fontWeight: '600', 
+                            fontSize: 11 
+                          }}>
+                            {formatTipo(selectedMensaje.tipo)}
+                          </Text>
+                        </View>
+                      )}
+                      
+                      {selectedMensaje.autorNombre && (
+                        <View style={{ 
+                          flexDirection: 'row', 
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          backgroundColor: '#FFF9E6',
+                          borderRadius: 10,
+                          alignSelf: 'flex-start'
+                        }}>
+                          <Icon name="person-outline" style={{ width: 14, height: 14, marginRight: 6 }} fill="#FFB020" />
+                          <Text style={{ color: '#A67C00', fontWeight: '600', fontSize: 11 }}>
+                            {selectedMensaje.autorNombre}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    
+                    <View style={{ 
+                      flexDirection: 'row', 
+                      alignItems: 'center',
+                      backgroundColor: '#F8FAFB',
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      borderRadius: 12,
+                      alignSelf: 'flex-start'
+                    }}>
+                      <Icon name="calendar-outline" style={{ width: 16, height: 16, marginRight: 8 }} fill="#00BFA5" />
+                      <Text style={{ color: '#00BFA5', fontWeight: '600', fontSize: 12 }}>
+                        {selectedMensaje.publicadoEn || selectedMensaje.creadoEn ? formatDate(selectedMensaje.publicadoEn || selectedMensaje.creadoEn) : 'Sin fecha'}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <Divider style={{ marginVertical: 16, backgroundColor: '#E6EBF0' }} />
+                  
+                  <View style={{ marginBottom: 20 }}>
+                    <Text 
+                      style={{ 
+                        lineHeight: 24, 
+                        color: '#2D3748', 
+                        fontSize: 15
+                      }}
+                    >
+                      {selectedMensaje.contenido || 'Sin contenido'}
+                    </Text>
+                  </View>
+                  
+                  <Button 
+                    style={{ borderRadius: 14 }} 
+                    onPress={() => setSelectedMensaje(null)}
+                    size="large"
+                  >
+                    Cerrar
+                  </Button>
+                </ScrollView>
+              </Card>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// � ASISTENCIAS TAB
+function AsistenciasTab() {
+  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [asistenciasPorAlumno, setAsistenciasPorAlumno] = useState<any>({});
+  
+  const alumnos = alumnosData?.alumnosTutor || [];
+  
+  // Calcular rango de fechas (última semana)
+  const calcularRangoFechas = () => {
+    const hasta = selectedDate || new Date();
+    const desde = new Date(hasta);
+    desde.setDate(desde.getDate() - 7);
+    
+    return {
+      desde: desde.toISOString().split('T')[0],
+      hasta: hasta.toISOString().split('T')[0]
+    };
+  };
+  
+  const { desde, hasta } = selectedDate ? { desde: selectedDate.toISOString().split('T')[0], hasta: selectedDate.toISOString().split('T')[0] } : calcularRangoFechas();
+  
+  // Query para obtener asistencias
+  const { data: asistenciasData, loading: loadingAsistencias, refetch } = useQuery(GET_ASISTENCIAS, {
+    variables: { desde, hasta },
+    skip: false
+  });
+
+  // Procesar asistencias cuando cambian
+  useEffect(() => {
+    if (asistenciasData?.asistenciasTutor) {
+      const asistencias = asistenciasData.asistenciasTutor;
+      
+      console.log('📊 Asistencias recibidas:', asistencias.length);
+      
+      // Agrupar por alumno
+      const porAlumno: any = {};
+      
+      asistencias.forEach((asistencia: any) => {
+        asistencia.registros.forEach((registro: any) => {
+          console.log(`   Registro: alumnoId=${registro.alumnoId}, estado=${registro.estado}`);
+          
+          if (!porAlumno[registro.alumnoId]) {
+            porAlumno[registro.alumnoId] = [];
+          }
+          porAlumno[registro.alumnoId].push({
+            id: asistencia.id,
+            fecha: asistencia.fecha,
+            presente: registro.estado === 'PRESENTE' || registro.estado === 'TARDE',
+            observaciones: registro.observaciones,
+            estado: registro.estado
+          });
+        });
+      });
+      
+      console.log('📋 Alumnos con asistencias:', Object.keys(porAlumno).length);
+      console.log('   IDs encontrados:', Object.keys(porAlumno));
+      console.log('   IDs de alumnos cargados:', alumnos.map((a: any) => a.id));
+      
+      setAsistenciasPorAlumno(porAlumno);
+    }
+  }, [asistenciasData, alumnos]);
+
+  const handleDateSearch = () => {
+    setShowDatePicker(true);
+  };
+
+  const handleDateSelect = (date: Date) => {
+    setSelectedDate(date);
+    setShowDatePicker(false);
+  };
+
+  const clearDateFilter = () => {
+    setSelectedDate(null);
+  };
+
+  if (loadingAlumnos) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Spinner size="large" />
+      </Layout>
+    );
+  }
+
+  if (alumnos.length === 0) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Icon name="calendar-outline" style={{ width: 80, height: 80 }} fill="#8F9BB3" />
+        <Text category="h6" style={{ marginTop: 16, textAlign: 'center' }}>
+          No hay alumnos asignados
+        </Text>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout style={{ flex: 1 }}>
+      {/* Barra de búsqueda por fecha */}
+      <View style={{ padding: 16, backgroundColor: '#F8FAFB', borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Button
+            size="small"
+            appearance="outline"
+            accessoryLeft={(props) => <Icon {...props} name="calendar-outline" />}
+            onPress={handleDateSearch}
+            style={{ flex: 1, borderRadius: 12 }}
+          >
+            {selectedDate 
+              ? selectedDate.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+              : 'Última semana'}
+          </Button>
+          {selectedDate && (
+            <Button
+              size="small"
+              appearance="ghost"
+              status="danger"
+              accessoryLeft={(props) => <Icon {...props} name="close-outline" />}
+              onPress={clearDateFilter}
+              style={{ borderRadius: 12 }}
+            >
+              Limpiar
+            </Button>
+          )}
+        </View>
+        {selectedDate && (
+          <Text appearance="hint" category="c1" style={{ marginTop: 4, textAlign: 'center' }}>
+            Mostrando asistencias del día seleccionado
+          </Text>
+        )}
+      </View>
+
+      <ScrollView style={{ flex: 1, padding: 16 }}>
+        {loadingAsistencias ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Spinner size="large" />
+            <Text appearance="hint" style={{ marginTop: 12 }}>Cargando asistencias...</Text>
+          </View>
+        ) : (
+          alumnos.map((alumno: any) => {
+            const asistencias = asistenciasPorAlumno[alumno.id] || [];
+            const presente = asistencias.filter((a: any) => a.presente).length;
+            const ausente = asistencias.filter((a: any) => !a.presente).length;
+            const porcentaje = asistencias.length > 0 
+              ? Math.round((presente / asistencias.length) * 100) 
+              : 0;
+
+            return (
+              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 12 }}>
+                {/* Header con nombre del alumno */}
+                <View style={{ marginBottom: 12 }}>
+                  <Text category="h6" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                    {alumno.nombre} {alumno.apellido}
+                  </Text>
+                </View>
+
+                <Divider style={{ marginBottom: 12 }} />
+
+                {/* Estadísticas */}
+                {asistencias.length === 0 ? (
+                  <View style={{ 
+                    padding: 20, 
+                    alignItems: 'center',
+                    backgroundColor: '#F8FAFB',
+                    borderRadius: 10
+                  }}>
+                    <Icon name="calendar-outline" style={{ width: 40, height: 40, marginBottom: 8 }} fill="#8F9BB3" />
+                    <Text appearance="hint" style={{ textAlign: 'center' }}>
+                      Sin registros de asistencia {selectedDate ? 'en esta fecha' : 'en la última semana'}
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                          {presente}
+                        </Text>
+                        <Text appearance="hint" category="c1">Presentes</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#FF6B6B', fontWeight: 'bold' }}>
+                          {ausente}
+                        </Text>
+                        <Text appearance="hint" category="c1">Ausentes</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#4A90E2', fontWeight: 'bold' }}>
+                          {porcentaje}%
+                        </Text>
+                        <Text appearance="hint" category="c1">Asistencia</Text>
+                      </View>
+                    </View>
+
+                    <Divider style={{ marginBottom: 12 }} />
+
+                    {/* Lista de asistencias */}
+                    <Text category="s1" style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                      Registros {selectedDate ? 'del día' : '(últimos 10)'}
+                    </Text>
+                    {asistencias.slice(0, 10).map((asistencia: any, index: number) => (
+                      <View key={`${asistencia.id}-${index}`}>
+                        <View 
+                          style={{ 
+                            flexDirection: 'row', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center',
+                            paddingVertical: 8,
+                            paddingHorizontal: 12,
+                            marginBottom: 6,
+                            backgroundColor: asistencia.presente ? '#E8F8F5' : '#FFE8E8',
+                            borderRadius: 8
+                          }}
+                        >
+                          <Text category="p2">
+                            {new Date(asistencia.fecha).toLocaleDateString('es-AR', { 
+                              day: '2-digit', 
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Icon 
+                              name={asistencia.presente ? 'checkmark-circle-2' : 'close-circle'} 
+                              style={{ width: 20, height: 20, marginRight: 6 }}
+                              fill={asistencia.presente ? '#00BFA5' : '#FF6B6B'}
+                            />
+                            <Text 
+                              category="p2" 
+                              style={{ 
+                                fontWeight: 'bold',
+                                color: asistencia.presente ? '#00BFA5' : '#FF6B6B'
+                              }}
+                            >
+                              {asistencia.estado === 'TARDE' ? 'Tarde' : asistencia.presente ? 'Presente' : 'Ausente'}
+                            </Text>
+                          </View>
+                        </View>
+                        {asistencia.observaciones && (
+                          <Text appearance="hint" category="c1" style={{ marginTop: -2, marginBottom: 6, marginLeft: 12, fontStyle: 'italic' }}>
+                            {asistencia.observaciones}
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDatePicker(false)}
+        >
+          <View 
+            style={{ 
+              flex: 1, 
+              backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              padding: 20
+            }}
+          >
+            <TouchableOpacity 
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              activeOpacity={1}
+              onPress={() => setShowDatePicker(false)}
+            />
+            
+            <View style={{ width: '100%', maxWidth: 400, zIndex: 1 }}>
+              <Card disabled style={{ borderRadius: 20 }}>
+                <Text category="h6" style={{ marginBottom: 16, textAlign: 'center' }}>
+                  Seleccionar fecha
+                </Text>
+                
+                {/* Lista de fechas rápidas (última semana) */}
+                <View style={{ marginBottom: 16 }}>
+                  {[...Array(7)].map((_, index) => {
+                    const date = new Date();
+                    date.setDate(date.getDate() - index);
+                    return (
+                      <Button
+                        key={index}
+                        size="medium"
+                        appearance="outline"
+                        onPress={() => handleDateSelect(date)}
+                        style={{ marginBottom: 8, borderRadius: 12 }}
+                      >
+                        {date.toLocaleDateString('es-AR', { 
+                          weekday: 'long',
+                          day: '2-digit', 
+                          month: 'long',
+                          year: 'numeric'
+                        })}
+                      </Button>
+                    );
+                  })}
+                </View>
+                
+                <Button 
+                  appearance="ghost"
+                  onPress={() => setShowDatePicker(false)}
+                  style={{ borderRadius: 12 }}
+                >
+                  Cancelar
+                </Button>
+              </Card>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </Layout>
+  );
+}
+
+  if (loadingAlumnos) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Spinner size="large" />
+      </Layout>
+    );
+  }
+
+  if (alumnos.length === 0) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Icon name="calendar-outline" style={{ width: 80, height: 80 }} fill="#8F9BB3" />
+        <Text category="h6" style={{ marginTop: 16, textAlign: 'center' }}>
+          No hay alumnos asignados
+        </Text>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout style={{ flex: 1 }}>
+      {/* Barra de búsqueda por fecha */}
+      <View style={{ padding: 16, backgroundColor: '#F8FAFB', borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Button
+            size="small"
+            appearance="outline"
+            accessoryLeft={(props) => <Icon {...props} name="calendar-outline" />}
+            onPress={handleDateSearch}
+            style={{ flex: 1, borderRadius: 12 }}
+          >
+            {selectedDate 
+              ? selectedDate.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+              : 'Última semana'}
+          </Button>
+          {selectedDate && (
+            <Button
+              size="small"
+              appearance="ghost"
+              status="danger"
+              accessoryLeft={(props) => <Icon {...props} name="close-outline" />}
+              onPress={clearDateFilter}
+              style={{ borderRadius: 12 }}
+            >
+              Limpiar
+            </Button>
+          )}
+        </View>
+        {selectedDate && (
+          <Text appearance="hint" category="c1" style={{ marginTop: 4, textAlign: 'center' }}>
+            Mostrando asistencias del día seleccionado
+          </Text>
+        )}
+      </View>
+
+      <ScrollView style={{ flex: 1, padding: 16 }}>
+        {loadingAsistencias ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Spinner size="large" />
+            <Text appearance="hint" style={{ marginTop: 12 }}>Cargando asistencias...</Text>
+          </View>
+        ) : (
+          alumnos.map((alumno: any) => {
+            const asistencias = asistenciasPorAlumno[alumno.id] || [];
+            const presente = asistencias.filter((a: any) => a.presente).length;
+            const ausente = asistencias.filter((a: any) => !a.presente).length;
+            const porcentaje = asistencias.length > 0 
+              ? Math.round((presente / asistencias.length) * 100) 
+              : 0;
+
+            return (
+              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 12 }}>
+                {/* Header con nombre del alumno */}
+                <View style={{ marginBottom: 12 }}>
+                  <Text category="h6" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                    {alumno.nombre} {alumno.apellido}
+                  </Text>
+                </View>
+
+                <Divider style={{ marginBottom: 12 }} />
+
+                {/* Estadísticas */}
+                {asistencias.length === 0 ? (
+                  <View style={{ 
+                    padding: 20, 
+                    alignItems: 'center',
+                    backgroundColor: '#F8FAFB',
+                    borderRadius: 10
+                  }}>
+                    <Icon name="calendar-outline" style={{ width: 40, height: 40, marginBottom: 8 }} fill="#8F9BB3" />
+                    <Text appearance="hint" style={{ textAlign: 'center' }}>
+                      Sin registros de asistencia {selectedDate ? 'en esta fecha' : 'en la última semana'}
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                          {presente}
+                        </Text>
+                        <Text appearance="hint" category="c1">Presentes</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#FF6B6B', fontWeight: 'bold' }}>
+                          {ausente}
+                        </Text>
+                        <Text appearance="hint" category="c1">Ausentes</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text category="h4" style={{ color: '#4A90E2', fontWeight: 'bold' }}>
+                          {porcentaje}%
+                        </Text>
+                        <Text appearance="hint" category="c1">Asistencia</Text>
+                      </View>
+                    </View>
+
+                    <Divider style={{ marginBottom: 12 }} />
+
+                    {/* Lista de asistencias */}
+                    <Text category="s1" style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                      Registros {selectedDate ? 'del día' : '(últimos 10)'}
+                    </Text>
+                    {asistencias.slice(0, 10).map((asistencia: any, index: number) => (
+                      <View key={`${asistencia.id}-${index}`}>
+                        <View 
+                          style={{ 
+                            flexDirection: 'row', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center',
+                            paddingVertical: 8,
+                            paddingHorizontal: 12,
+                            marginBottom: 6,
+                            backgroundColor: asistencia.presente ? '#E8F8F5' : '#FFE8E8',
+                            borderRadius: 8
+                          }}
+                        >
+                          <Text category="p2">
+                            {new Date(asistencia.fecha).toLocaleDateString('es-AR', { 
+                              day: '2-digit', 
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Icon 
+                              name={asistencia.presente ? 'checkmark-circle-2' : 'close-circle'} 
+                              style={{ width: 20, height: 20, marginRight: 6 }}
+                              fill={asistencia.presente ? '#00BFA5' : '#FF6B6B'}
+                            />
+                            <Text 
+                              category="p2" 
+                              style={{ 
+                                fontWeight: 'bold',
+                                color: asistencia.presente ? '#00BFA5' : '#FF6B6B'
+                              }}
+                            >
+                              {asistencia.presente ? 'Presente' : 'Ausente'}
+                            </Text>
+                          </View>
+                        </View>
+                        {asistencia.observaciones && (
+                          <Text appearance="hint" category="c1" style={{ marginTop: -2, marginBottom: 6, marginLeft: 12, fontStyle: 'italic' }}>
+                            {asistencia.observaciones}
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDatePicker(false)}
+        >
+          <View 
+            style={{ 
+              flex: 1, 
+              backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              padding: 20
+            }}
+          >
+            <TouchableOpacity 
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              activeOpacity={1}
+              onPress={() => setShowDatePicker(false)}
+            />
+            
+            <View style={{ width: '100%', maxWidth: 400, zIndex: 1 }}>
+              <Card disabled style={{ borderRadius: 20 }}>
+                <Text category="h6" style={{ marginBottom: 16, textAlign: 'center' }}>
+                  Seleccionar fecha
+                </Text>
+                
+                {/* Lista de fechas rápidas (última semana) */}
+                <View style={{ marginBottom: 16 }}>
+                  {[...Array(7)].map((_, index) => {
+                    const date = new Date();
+                    date.setDate(date.getDate() - index);
+                    return (
+                      <Button
+                        key={index}
+                        size="medium"
+                        appearance="outline"
+                        onPress={() => handleDateSelect(date)}
+                        style={{ marginBottom: 8, borderRadius: 12 }}
+                      >
+                        {date.toLocaleDateString('es-AR', { 
+                          weekday: 'long',
+                          day: '2-digit', 
+                          month: 'long',
+                          year: 'numeric'
+                        })}
+                      </Button>
+                    );
+                  })}
+                </View>
+                
+                <Button 
+                  appearance="ghost"
+                  onPress={() => setShowDatePicker(false)}
+                  style={{ borderRadius: 12 }}
+                >
+                  Cancelar
+                </Button>
+              </Card>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </Layout>
+  );
+}
+
+// �📊 PLACEHOLDER
+function PlaceholderTab({ icon, title }: { icon: string; title: string }) {
+  return (
+    <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+      <Icon name={icon} style={{ width: 80, height: 80 }} fill="#8F9BB3" />
+      <Text category="h5" style={{ marginTop: 16 }}>{title}</Text>
+      <Text appearance="hint" style={{ textAlign: 'center', marginTop: 8 }}>
+        Próximamente disponible
+      </Text>
+    </Layout>
+  );
+}
+
+// 🎯 APP CONTENT
+function AppContent() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      setIsAuthenticated(!!token);
+    } catch (error) {
+      console.error('Error checking auth:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = () => setIsAuthenticated(true);
+  
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('authToken');
+    await AsyncStorage.removeItem('tutorData');
+    setIsAuthenticated(false);
+  };
+
+  if (loading) {
+    return (
+      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Spinner size="giant" />
+      </Layout>
+    );
+  }
+
+  return isAuthenticated ? <HomeScreen onLogout={handleLogout} /> : <LoginScreen onLogin={handleLogin} />;
+}
+
+// 🎨 APP PRINCIPAL
+export default function App() {
+  return (
+    <>
+      <IconRegistry icons={EvaIconsPack} />
+      <ApplicationProvider {...eva} theme={customTheme}>
+        <ApolloProvider client={apolloClient}>
+          <AppContent />
+        </ApolloProvider>
+      </ApplicationProvider>
+    </>
+  );
+}

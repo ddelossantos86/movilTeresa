@@ -1,0 +1,17 @@
+El componente CalificacionesTab debe ser actualizado para:
+
+1. Agregar estado para manejar nivel inicial:
+   - expandedCampos
+   - detectar nivel del alumno seleccionado
+
+2. Usar dos queries condicionales:
+   - GET_CALIFICACIONES (skip si es nivel inicial)
+   - GET_OBSERVACIONES_INICIAL (skip si NO es nivel inicial)
+
+3. Renderizar diferente según el nivel:
+   - Para INICIAL/MATERNAL: mostrar camposFormativos con logrosAlcanzados, enDesarrollo, enRevision
+   - Para otros niveles: mostrar materias con evaluaciones y notas numéricas
+
+Backend ya está listo con:
+- Resolver: observacionesInicialesTutor
+- Servicio: findObservacionesInicialesTutor
