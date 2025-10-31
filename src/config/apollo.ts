@@ -14,7 +14,7 @@ const PRODUCTION_IP = '149.50.150.151';
 
 // Usar IP de producción o desarrollo según configuración
 const API_URL = IS_PRODUCTION 
-  ? `http://${PRODUCTION_IP}:3000/graphql`
+  ? `http://${PRODUCTION_IP}:3090/graphql`
   : `http://${LOCAL_IP}:3000/graphql`;
 
 console.log('🌐 Entorno:', IS_PRODUCTION ? 'PRODUCCIÓN' : 'DESARROLLO');
