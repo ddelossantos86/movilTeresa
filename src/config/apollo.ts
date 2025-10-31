@@ -8,7 +8,7 @@ import { Platform } from 'react-native';
 // DESARROLLO: IP local (cambiar según tu red)
 // PRODUCCIÓN: IP del servidor DonWeb
 
-const IS_PRODUCTION = false; // Cambiar a true para compilar versión de producción
+const IS_PRODUCTION = true; // Cambiar a true para compilar versión de producción
 const LOCAL_IP = '10.1.142.88';
 const PRODUCTION_IP = '149.50.150.151';
 
