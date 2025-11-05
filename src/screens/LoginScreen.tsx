@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useMutation } from '@apollo/client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { LOGIN_TUTOR } from '../graphql/queries';
 
 export default function LoginScreen({ navigation }: any) {
@@ -87,6 +88,12 @@ export default function LoginScreen({ navigation }: any) {
           )}
         </TouchableOpacity>
       </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.versionText}>
+          Versión {Constants.expoConfig?.version || '1.0.0'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -138,5 +145,15 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 20,
+    alignSelf: 'center',
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
   },
 });

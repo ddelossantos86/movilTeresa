@@ -13,7 +13,8 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.teresacolegio.movil"
     },
     "android": {
       "package": "com.teresacolegio.movil",
@@ -26,9 +27,17 @@
       "usesCleartextTraffic": true,
       "permissions": [
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "POST_NOTIFICATIONS"
       ],
-      "networkSecurityConfig": "./network-security-config.xml"
+      "networkSecurityConfig": "./network-security-config.xml",
+      "googleServicesFile": "./google-services.json"
+    },
+    "notification": {
+      "icon": "./assets/adaptive-icon.png",
+      "color": "#00BFA5",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Teresa Colegio"
     },
     "web": {
       "favicon": "./assets/favicon.png"

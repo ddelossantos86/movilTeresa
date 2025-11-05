@@ -241,3 +241,12 @@ export const UPDATE_ALUMNO_CONDICIONES = gql`
     }
   }
 `;
+
+export const UPDATE_PUSH_TOKEN = gql`
+  mutation UpdatePushToken($token: String!) {
+    updateTutorPushToken(token: $token) {
+      id
+      pushToken
+    }
+  }
+`;

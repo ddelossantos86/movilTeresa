@@ -5,11 +5,18 @@ import { EvaIconsPack } from '@ui-kitten/eva-icons';
 import * as eva from '@eva-design/eva';
 import { ApolloProvider, useMutation, useQuery, gql } from '@apollo/client';
 import { apolloClient } from './src/config/apollo';
-import { LOGIN_TUTOR, GET_MENSAJES_TUTOR, MARCAR_MENSAJE_LEIDO, GET_ALUMNOS_TUTOR, GET_ASISTENCIAS, GET_CALIFICACIONES, GET_OBSERVACIONES_INICIAL, GET_SEGUIMIENTO_DIARIO, UPDATE_TUTOR_PROFILE, UPDATE_ALUMNO_CONDICIONES, GET_TUTOR_INFO } from './src/graphql/queries';
+import { LOGIN_TUTOR, GET_MENSAJES_TUTOR, MARCAR_MENSAJE_LEIDO, GET_ALUMNOS_TUTOR, GET_ASISTENCIAS, GET_CALIFICACIONES, GET_OBSERVACIONES_INICIAL, GET_SEGUIMIENTO_DIARIO, UPDATE_TUTOR_PROFILE, UPDATE_ALUMNO_CONDICIONES, GET_TUTOR_INFO, UPDATE_PUSH_TOKEN } from './src/graphql/queries';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import TeresaLogo from './assets/TeresaLogo';
+import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import TeresaLogoIcon from './assets/TeresaLogoIcon';
 import { BlurView } from '@react-native-community/blur';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // Suprimir warnings conocidos de UI Kitten y React Native
 LogBox.ignoreLogs([
@@ -34,6 +41,16 @@ console.warn = (...args) => {
   }
   originalWarn(...args);
 };
+
+// 🔔 CONFIGURACIÓN DE NOTIFICACIONES
+// Configurar cómo se manejan las notificaciones cuando la app está en foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 // 🎨 TEMA CLARO VIBRANTE - Colores alegres y modernos
 const customTheme = {
@@ -79,21 +96,71 @@ const customTheme = {
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [documento, setDocumento] = useState('');
   const [password, setPassword] = useState('');
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [loginTutor, { loading }] = useMutation(LOGIN_TUTOR);
 
-  const handleLogin = async () => {
+  // Verificar si hay biometría disponible al cargar
+  useEffect(() => {
+    checkBiometricSupport();
+  }, []);
+
+  const checkBiometricSupport = async () => {
+    try {
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      const isAvailable = compatible && enrolled;
+      setBiometricAvailable(isAvailable);
+      
+      if (isAvailable) {
+        const enabled = await SecureStore.getItemAsync('biometricEnabled');
+        setBiometricEnabled(enabled === 'true');
+        
+        // Si está habilitada, intentar login automático
+        if (enabled === 'true') {
+          await authenticateWithBiometrics();
+        }
+      }
+    } catch (error) {
+      console.error('Error verificando biometría:', error);
+    }
+  };
+
+  const authenticateWithBiometrics = async () => {
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Autenticar con huella digital o Face ID',
+        fallbackLabel: 'Usar contraseña',
+        cancelLabel: 'Cancelar',
+      });
+
+      if (result.success) {
+        // Obtener credenciales guardadas
+        const savedDocumento = await SecureStore.getItemAsync('userDocumento');
+        const savedPassword = await SecureStore.getItemAsync('userPassword');
+        
+        if (savedDocumento && savedPassword) {
+          // Hacer login automático
+          await performLogin(savedDocumento, savedPassword);
+        }
+      }
+    } catch (error) {
+      console.error('Error en autenticación biométrica:', error);
+    }
+  };
+
+  const performLogin = async (doc: string, pass: string) => {
     try {
       const { data } = await loginTutor({ 
         variables: { 
           input: { 
-            documento, 
-            password 
+            documento: doc, 
+            password: pass 
           } 
         } 
       });
       if (data?.loginTutorPassword?.token) {
         await AsyncStorage.setItem('authToken', data.loginTutorPassword.token);
-        // El campo se llama 'user' no 'tutor'
         console.log('🔐 Login Response User:', data.loginTutorPassword.user);
         if (data.loginTutorPassword.user) {
           await AsyncStorage.setItem('tutorData', JSON.stringify(data.loginTutorPassword.user));
@@ -105,8 +172,36 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     }
   };
 
+  const handleLogin = async () => {
+    await performLogin(documento, password);
+    
+    // Si el login fue exitoso y hay biometría disponible, preguntar si quiere habilitarla
+    if (biometricAvailable && !biometricEnabled) {
+      Alert.alert(
+        'Autenticación Biométrica',
+        '¿Deseas habilitar la autenticación con huella digital o Face ID para futuros accesos?',
+        [
+          {
+            text: 'No',
+            style: 'cancel'
+          },
+          {
+            text: 'Sí, habilitar',
+            onPress: async () => {
+              await SecureStore.setItemAsync('userDocumento', documento);
+              await SecureStore.setItemAsync('userPassword', password);
+              await SecureStore.setItemAsync('biometricEnabled', 'true');
+              setBiometricEnabled(true);
+            }
+          }
+        ]
+      );
+    }
+  };
+
   const PersonIcon = (props: any) => <Icon {...props} name="person-outline" />;
   const LockIcon = (props: any) => <Icon {...props} name="lock-outline" />;
+  const FingerprintIcon = (props: any) => <Icon {...props} name="npm-outline" />;
 
   return (
     <>
@@ -145,6 +240,8 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         onChangeText={setDocumento}
         accessoryLeft={PersonIcon}
         keyboardType="numeric"
+        autoCapitalize="none"
+        autoCorrect={false}
         size="large"
         style={{ marginBottom: 16, borderRadius: 12 }}
       />
@@ -155,18 +252,32 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         onChangeText={setPassword}
         accessoryLeft={LockIcon}
         secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
         size="large"
-        style={{ marginBottom: 24, borderRadius: 12 }}
+        style={{ marginBottom: 16, borderRadius: 12 }}
       />
 
       <Button 
         onPress={handleLogin} 
         disabled={loading || !documento || !password} 
         size="large"
-        style={{ borderRadius: 12 }}
+        style={{ borderRadius: 12, marginBottom: 12 }}
       >
         {loading ? 'Ingresando...' : 'Ingresar'}
       </Button>
+
+      {biometricAvailable && biometricEnabled && (
+        <Button 
+          onPress={authenticateWithBiometrics} 
+          appearance="ghost"
+          size="large"
+          accessoryLeft={FingerprintIcon}
+          style={{ borderRadius: 12 }}
+        >
+          Usar Huella/Face ID
+        </Button>
+      )}
         </ScrollView>
       </Layout>
     </>
@@ -201,6 +312,9 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
   const { data: alumnosData } = useQuery(GET_ALUMNOS_TUTOR);
   const alumnos = alumnosData?.alumnosTutor || [];
   const tieneMaternalAlumno = alumnos.some((a: any) => a.nivel === 'MATERNAL');
+  
+  // Estado global para filtro de alumno (compartido entre todas las secciones)
+  const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(null);
   
   // DEBUG: Ver niveles de alumnos
   console.log('🔍 DEBUG Alumnos:', alumnos.map((a: any) => ({ nombre: a.nombre, nivel: a.nivel })));
@@ -271,71 +385,99 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
     <>
       <StatusBar barStyle="light-content" backgroundColor="#00BFA5" />
       <SafeAreaView style={{ flex: 1, backgroundColor: '#00BFA5' }}>
-        {/* Header personalizado */}
+        {/* Header personalizado - Compacto */}
         <View style={{ 
           backgroundColor: '#00BFA5',
-          paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0,
-          paddingBottom: 12,
-          paddingHorizontal: 20,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 4
+          paddingTop: 15,
+          paddingBottom: 15,
+          paddingHorizontal: 16
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            {/* Logo y título */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-              <View style={{ 
-                width: 42, 
-                height: 42, 
-                borderRadius: 21, 
-                overflow: 'hidden',
-                marginRight: 12
-              }}>
-                <TeresaLogoIcon size={42} />
-              </View>
-              <View>
-                <Text category="s1" style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '600' }}>
-                  {getTituloActivo()}
-                </Text>
-                {tutorNombre && (
-                  <Text category="c1" style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>
-                    {tutorNombre}
+              {/* Logo y título */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <View style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  overflow: 'hidden',
+                  marginRight: 10
+                }}>
+                  <TeresaLogoIcon size={36} />
+                </View>
+                <View>
+                  <Text category="s1" style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>
+                    {getTituloActivo()}
                   </Text>
-                )}
+                  {tutorNombre && (
+                    <Text category="c1" style={{ color: 'rgba(255,255,255,0.95)', fontSize: 11, marginTop: 1 }}>
+                      {tutorNombre}
+                    </Text>
+                  )}
+                </View>
               </View>
+              
+              {/* Botón de configuraciones - Solo visible si NO estás en configuraciones */}
+              {activeTab !== 'configuraciones' && (
+                <TouchableOpacity 
+                  onPress={() => handleTabChange('configuraciones')}
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: 'rgba(255,255,255,0.25)',
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}
+                >
+                  <Icon 
+                    name="settings-outline" 
+                    fill="#FFFFFF" 
+                    style={{ width: 22, height: 22 }} 
+                  />
+                </TouchableOpacity>
+              )}
             </View>
-            
-            {/* Botón de configuraciones - Solo visible si NO estás en configuraciones */}
-            {activeTab !== 'configuraciones' && (
-              <TouchableOpacity 
-                onPress={() => handleTabChange('configuraciones')}
-                style={{ 
-                  width: 40, 
-                  height: 40, 
-                  borderRadius: 20, 
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  justifyContent: 'center',
-                  alignItems: 'center'
-                }}
-              >
-                <Icon 
-                  name="settings-outline" 
-                  fill="#FFFFFF" 
-                  style={{ width: 24, height: 24 }} 
-                />
-              </TouchableOpacity>
-            )}
-          </View>
         </View>
 
       <View style={{ flex: 1, position: 'relative' }}>
-        {activeTab === 'mensajes' && <MensajesTab onMensajesUpdate={setMensajes} />}
-        {activeTab === 'dashboard' && <DashboardTab alumnos={alumnos} />}
-        {activeTab === 'asistencias' && <AsistenciasTab />}
-        {activeTab === 'evaluaciones' && <EvaluacionesTab />}
-        {activeTab === 'seguimiento' && tieneMaternalAlumno && <SeguimientoTab />}
+        {activeTab === 'mensajes' && (
+          <MensajesTab 
+            onMensajesUpdate={setMensajes} 
+            alumnoId={selectedAlumnoId}
+            alumnos={alumnos}
+            selectedAlumnoId={selectedAlumnoId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+          />
+        )}
+        {activeTab === 'dashboard' && (
+          <DashboardTab 
+            alumnos={alumnos}
+            selectedAlumnoId={selectedAlumnoId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+            setActiveTab={setActiveTab}
+          />
+        )}
+        {activeTab === 'asistencias' && (
+          <AsistenciasTab 
+            alumnos={alumnos}
+            selectedAlumnoId={selectedAlumnoId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+          />
+        )}
+        {activeTab === 'evaluaciones' && (
+          <EvaluacionesTab 
+            alumnos={alumnos}
+            selectedAlumnoId={selectedAlumnoId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+          />
+        )}
+        {activeTab === 'seguimiento' && tieneMaternalAlumno && (
+          <SeguimientoTab 
+            alumnos={alumnos}
+            selectedAlumnoId={selectedAlumnoId}
+            setSelectedAlumnoId={setSelectedAlumnoId}
+          />
+        )}
         {activeTab === 'configuraciones' && <ConfiguracionesTab onLogout={onLogout} />}
         
         {/* Blur overlay durante transición - Fondo opaco */}
@@ -390,82 +532,139 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             <Spinner size="large" />
           </View>
         )}
-      </View>
 
-      {/* TAB BAR DINÁMICO */}
-      <Layout level="4" style={{ backgroundColor: '#000000ff', flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: 'rgba(0, 0, 0, 0.05)' }}>
-        <Button
-          appearance={activeTab === 'dashboard' ? 'filled' : 'ghost'}
-          accessoryLeft={(props) => <Icon {...props} name="home-outline" width={26} height={26} />}
-          onPress={() => handleTabChange('dashboard')}
-          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-          size="small"
-        />
-        
-        <Button
-          appearance={activeTab === 'mensajes' ? 'filled' : 'ghost'}
-          accessoryLeft={(props) => <Icon {...props} name="email-outline" width={26} height={26} />}
-          onPress={() => handleTabChange('mensajes')}
-          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-          size="small"
-        />
-        
-        <Button
-          appearance={activeTab === 'asistencias' ? 'filled' : 'ghost'}
-          accessoryLeft={(props) => <Icon {...props} name="calendar-outline" width={26} height={26} />}
-          onPress={() => handleTabChange('asistencias')}
-          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-          size="small"
-        />
-        
-        {/* Tab universal de Evaluaciones */}
-        <Button
-          appearance={activeTab === 'evaluaciones' ? 'filled' : 'ghost'}
-          accessoryLeft={(props) => <Icon {...props} name="bar-chart-outline" width={26} height={26} />}
-          onPress={() => handleTabChange('evaluaciones')}
-          style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-          size="small"
-        />
-        
-        {/* Tab Seguimiento - Solo visible si hay alumnos de nivel MATERNAL */}
-        {tieneMaternalAlumno && (
+        {/* TAB BAR FLOTANTE */}
+        <View style={{ 
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          borderTopWidth: 1,
+          borderTopColor: 'rgba(255, 255, 255, 0.1)',
+          flexDirection: 'row',
+          paddingVertical: 12,
+          paddingHorizontal: 10,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 12
+        }}>
           <Button
-            appearance={activeTab === 'seguimiento' ? 'filled' : 'ghost'}
-            accessoryLeft={(props) => <Icon {...props} name="activity-outline" width={26} height={26} />}
-            onPress={() => handleTabChange('seguimiento')}
+            appearance={activeTab === 'dashboard' ? 'filled' : 'ghost'}
+            accessoryLeft={(props) => <Icon {...props} name="home-outline" width={26} height={26} />}
+            onPress={() => handleTabChange('dashboard')}
             style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
             size="small"
           />
-        )}
-      </Layout>
+          
+          <Button
+            appearance={activeTab === 'mensajes' ? 'filled' : 'ghost'}
+            accessoryLeft={(props) => <Icon {...props} name="email-outline" width={26} height={26} />}
+            onPress={() => handleTabChange('mensajes')}
+            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+            size="small"
+          />
+          
+          <Button
+            appearance={activeTab === 'asistencias' ? 'filled' : 'ghost'}
+            accessoryLeft={(props) => <Icon {...props} name="calendar-outline" width={26} height={26} />}
+            onPress={() => handleTabChange('asistencias')}
+            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+            size="small"
+          />
+          
+          {/* Tab universal de Evaluaciones */}
+          <Button
+            appearance={activeTab === 'evaluaciones' ? 'filled' : 'ghost'}
+            accessoryLeft={(props) => <Icon {...props} name="bar-chart-outline" width={26} height={26} />}
+            onPress={() => handleTabChange('evaluaciones')}
+            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+            size="small"
+          />
+          
+          {/* Tab Seguimiento - Solo visible si hay alumnos de nivel MATERNAL */}
+          {tieneMaternalAlumno && (
+            <Button
+              appearance={activeTab === 'seguimiento' ? 'filled' : 'ghost'}
+              accessoryLeft={(props) => <Icon {...props} name="activity-outline" width={26} height={26} />}
+              onPress={() => handleTabChange('seguimiento')}
+              style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+              size="small"
+            />
+          )}
+        </View>
+      </View>
     </SafeAreaView>
     </>
   );
 }
 
+// 🎯 COMPONENTE REUTILIZABLE: Filtro de Alumnos
+function FiltroAlumnos({ 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId 
+}: { 
+  alumnos: any[]; 
+  selectedAlumnoId: string | null; 
+  setSelectedAlumnoId: (id: string | null) => void;
+}) {
+  if (alumnos.length <= 1) return null;
+  
+  return (
+    <View style={{ padding: 16, paddingBottom: 0 }}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={{ marginBottom: 8 }}
+      >
+        <Button
+          size="small"
+          appearance={selectedAlumnoId === null ? 'filled' : 'outline'}
+          onPress={() => setSelectedAlumnoId(null)}
+          style={{ marginRight: 8, borderRadius: 20 }}
+        >
+          Todos
+        </Button>
+        {alumnos.map((alumno: any) => (
+          <Button
+            key={alumno.id}
+            size="small"
+            appearance={selectedAlumnoId === alumno.id ? 'filled' : 'outline'}
+            onPress={() => setSelectedAlumnoId(alumno.id)}
+            style={{ marginRight: 8, borderRadius: 20 }}
+          >
+            {`${alumno.nombre} ${alumno.apellido}`}
+          </Button>
+        ))}
+      </ScrollView>
+      <Divider style={{ marginTop: 8 }} />
+    </View>
+  );
+}
+
 // 📧 MENSAJES
-function MensajesTab({ onMensajesUpdate, alumnoId }: { onMensajesUpdate: (mensajes: any[]) => void; alumnoId?: string }) {
+function MensajesTab({ 
+  onMensajesUpdate, 
+  alumnoId, 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId 
+}: { 
+  onMensajesUpdate: (mensajes: any[]) => void; 
+  alumnoId?: string;
+  alumnos: any[];
+  selectedAlumnoId: string | null;
+  setSelectedAlumnoId: (id: string | null) => void;
+}) {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMensaje, setSelectedMensaje] = useState<any>(null);
   const [showNuevoMensaje, setShowNuevoMensaje] = useState(false);
   const [responderA, setResponderA] = useState<any>(null);
-  // State local para el filtro de mensajes (puede ser diferente al alumno seleccionado en HomeScreen)
-  const [selectedAlumnoId, setSelectedAlumnoId] = useState<string | null>(alumnoId || null);
   
-  // Sincronizar con el prop cuando cambia
-  useEffect(() => {
-    if (alumnoId !== undefined) {
-      setSelectedAlumnoId(alumnoId);
-    }
-  }, [alumnoId]);
-  
-  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
   const { data, loading, refetch } = useQuery(GET_MENSAJES_TUTOR, {
     variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {}
   });
   const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
 
-  const alumnos = alumnosData?.alumnosTutor || [];
   const mensajes = data?.mensajesTutor || [];
   
   // Función para obtener los alumnos por destinatarioIds
@@ -575,43 +774,15 @@ function MensajesTab({ onMensajesUpdate, alumnoId }: { onMensajesUpdate: (mensaj
     <>
       <Layout style={{ flex: 1 }}>
         {/* Selector de alumno */}
-        {alumnos.length > 1 && (
-          <View style={{ padding: 16, paddingBottom: 0 }}>
-            {/* <Text category="label" appearance="hint" style={{ marginBottom: 8 }}>
-              Filtrar mensajes por alumno:
-            </Text> */}
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={{ marginBottom: 8 }}
-            >
-              <Button
-                size="small"
-                appearance={selectedAlumnoId === null ? 'filled' : 'outline'}
-                onPress={() => setSelectedAlumnoId(null)}
-                style={{ marginRight: 8, borderRadius: 20 }}
-              >
-                Todos
-              </Button>
-              {alumnos.map((alumno: any) => (
-                <Button
-                  key={alumno.id}
-                  size="small"
-                  appearance={selectedAlumnoId === alumno.id ? 'filled' : 'outline'}
-                  onPress={() => setSelectedAlumnoId(alumno.id)}
-                  style={{ marginRight: 8, borderRadius: 20 }}
-                >
-                  {`${alumno.nombre} ${alumno.apellido}`}
-                </Button>
-              ))}
-            </ScrollView>
-            <Divider style={{ marginTop: 8 }} />
-          </View>
-        )}
+        <FiltroAlumnos 
+          alumnos={alumnos}
+          selectedAlumnoId={selectedAlumnoId}
+          setSelectedAlumnoId={setSelectedAlumnoId}
+        />
         
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           {loading && !refreshing ? (
@@ -769,7 +940,7 @@ function MensajesTab({ onMensajesUpdate, alumnoId }: { onMensajesUpdate: (mensaj
         <TouchableOpacity
           style={{
             position: 'absolute',
-            bottom: 20,
+            bottom: 100,
             right: 20,
             width: 60,
             height: 60,
@@ -1579,38 +1750,42 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
 }
 
 // 📊 EVALUACIONES TAB (Universal: Notas o Campos Formativos según nivel)
-function EvaluacionesTab() {
-  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
-  const [selectedAlumno, setSelectedAlumno] = useState<string | null>(null);
+function EvaluacionesTab({ 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId 
+}: { 
+  alumnos: any[]; 
+  selectedAlumnoId: string | null;
+  setSelectedAlumnoId: (id: string | null) => void;
+}) {
   const [selectedMateriaIndex, setSelectedMateriaIndex] = useState<IndexPath>(new IndexPath(0));
   const [refreshing, setRefreshing] = useState(false);
   
-  const alumnos = alumnosData?.alumnosTutor || [];
-  
   // Si hay alumnos pero no hay seleccionado, seleccionar el primero automáticamente
   useEffect(() => {
-    if (alumnos.length > 0 && !selectedAlumno) {
-      setSelectedAlumno(alumnos[0].id);
+    if (alumnos.length > 0 && !selectedAlumnoId) {
+      setSelectedAlumnoId(alumnos[0].id);
     }
   }, [alumnos.length]);
   
   // Obtener alumno seleccionado y su nivel
-  const alumnoActual = alumnos.find((a: any) => a.id === selectedAlumno);
+  const alumnoActual = alumnos.find((a: any) => a.id === selectedAlumnoId);
   const nivelAlumno = alumnoActual?.nivel || 'PRIMARIO';
   const esNivelInicial = nivelAlumno === 'MATERNAL' || nivelAlumno === 'INICIAL';
   
-  const shouldSkipCalificaciones = !selectedAlumno || esNivelInicial;
-  const shouldSkipObservaciones = !selectedAlumno || !esNivelInicial;
+  const shouldSkipCalificaciones = !selectedAlumnoId || esNivelInicial;
+  const shouldSkipObservaciones = !selectedAlumnoId || !esNivelInicial;
   
   // Query para calificaciones (Primario/Secundario)
   const { data: calificacionesData, loading: loadingCalificaciones, error: errorCalificaciones, refetch: refetchCalificaciones } = useQuery(GET_CALIFICACIONES, {
-    variables: { alumnoId: selectedAlumno },
+    variables: { alumnoId: selectedAlumnoId },
     skip: shouldSkipCalificaciones
   });
   
   // Query para observaciones iniciales (Maternal/Inicial)
   const { data: observacionesData, loading: loadingObservaciones, error: errorObservaciones, refetch: refetchObservaciones } = useQuery(GET_OBSERVACIONES_INICIAL, {
-    variables: { alumnoId: selectedAlumno },
+    variables: { alumnoId: selectedAlumnoId },
     skip: shouldSkipObservaciones
   });
   
@@ -1639,7 +1814,7 @@ function EvaluacionesTab() {
     materias.forEach((materia: any) => {
       if (materia.evaluaciones && materia.evaluaciones.length > 0) {
         materia.evaluaciones.forEach((evaluacion: any) => {
-          const notaAlumno = evaluacion.notas?.find((n: any) => n.alumnoId === selectedAlumno);
+          const notaAlumno = evaluacion.notas?.find((n: any) => n.alumnoId === selectedAlumnoId);
           if (notaAlumno || evaluacion.notas?.length === 0) { // Mostrar si tiene nota o si no hay notas aún
             lista.push({
               ...evaluacion,
@@ -1654,7 +1829,7 @@ function EvaluacionesTab() {
     
     // Ordenar por fecha descendente (más reciente primero)
     return lista.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-  }, [materias, selectedAlumno]);
+  }, [materias, selectedAlumnoId]);
   
   // Lista de materias únicas para el selector
   const materiasUnicas = React.useMemo(() => {
@@ -1690,25 +1865,11 @@ function EvaluacionesTab() {
   return (
     <Layout style={{ flex: 1 }} level="2">
       {/* Selector de alumno */}
-      {alumnos.length > 1 && (
-        <View style={{ backgroundColor: '#FFFFFF', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {alumnos.map((alumno: any) => (
-                <Button
-                  key={alumno.id}
-                  size="small"
-                  appearance={selectedAlumno === alumno.id ? 'filled' : 'outline'}
-                  onPress={() => setSelectedAlumno(alumno.id)}
-                  style={{ borderRadius: 12 }}
-                >
-                  {`${alumno.nombre} ${alumno.apellido}`}
-                </Button>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      )}
+      <FiltroAlumnos 
+        alumnos={alumnos}
+        selectedAlumnoId={selectedAlumnoId}
+        setSelectedAlumnoId={setSelectedAlumnoId}
+      />
       
       {/* Indicador de nivel */}
       <View style={{ backgroundColor: esNivelInicial ? '#E6F7F4' : '#E3F2FD', padding: 12 }}>
@@ -1719,7 +1880,7 @@ function EvaluacionesTab() {
       
       <ScrollView 
         style={{ flex: 1 }} 
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1729,15 +1890,37 @@ function EvaluacionesTab() {
           />
         }
       >
-        {(loadingCalificaciones || loadingObservaciones) ? (
-          <View style={{ padding: 40, alignItems: 'center' }}>
-            <Spinner size="large" />
-            <Text appearance="hint" style={{ marginTop: 12 }}>Cargando...</Text>
-          </View>
+        {(loadingCalificaciones || loadingObservaciones) && !refreshing ? (
+          // Skeleton loading
+          <>
+            {[1, 2, 3].map((i) => (
+              <Card
+                key={i}
+                disabled
+                style={{ 
+                  marginBottom: 16, 
+                  borderRadius: 16, 
+                  backgroundColor: '#F8FAFB',
+                  borderWidth: 1,
+                  borderColor: '#E6EBF0'
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <View style={{ flex: 1, gap: 8 }}>
+                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                  </View>
+                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                </View>
+                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+              </Card>
+            ))}
+          </>
         ) : esNivelInicial ? (
           // VISTA PARA MATERNAL/INICIAL - Campos Formativos
           observaciones.length === 0 ? (
-            <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB' }}>
+            <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                 <Icon name="book-outline" style={{ width: 60, height: 60, marginBottom: 16 }} fill="#00BFA5" />
                 <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>Sin observaciones</Text>
@@ -1746,7 +1929,7 @@ function EvaluacionesTab() {
             </Card>
           ) : (
             observaciones.map((obs: any) => (
-              <Card key={obs.id} style={{ marginBottom: 16, borderRadius: 12 }}>
+              <Card key={obs.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
                 <Text category="h6" style={{ marginBottom: 12, color: '#00BFA5' }}>
                   Período: {obs.periodo}
                 </Text>
@@ -1836,7 +2019,7 @@ function EvaluacionesTab() {
             
             {/* Lista cronológica de evaluaciones */}
             {evaluacionesFiltradas.length === 0 ? (
-              <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB' }}>
+              <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Text category="h6" style={{ marginBottom: 8, color: '#2196F3' }}>Sin evaluaciones</Text>
                   <Text appearance="hint">
@@ -1865,7 +2048,7 @@ function EvaluacionesTab() {
                 }
                 
                 return (
-                  <Card key={`${evaluacion._id}-${idx}`} style={{ marginBottom: 12, borderRadius: 12 }}>
+                  <Card key={`${evaluacion._id}-${idx}`} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
                     {/* Fecha */}
                     <View style={{ marginBottom: 8 }}>
                       <Text appearance="hint" category="c1">
@@ -1950,8 +2133,15 @@ function EvaluacionesTab() {
 }
 
 // 📅 ASISTENCIAS TAB
-function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
-  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
+function AsistenciasTab({ 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId 
+}: { 
+  alumnos: any[]; 
+  selectedAlumnoId: string | null;
+  setSelectedAlumnoId: (id: string | null) => void;
+}) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [viewMode, setViewMode] = useState<'ultimos' | 'dia' | 'semana' | 'mes'>('ultimos');
@@ -1959,11 +2149,9 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
   const [tempDate, setTempDate] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState(false);
   
-  const alumnos = alumnosData?.alumnosTutor || [];
-  
-  // Filtrar alumnos si se proporciona alumnoId
-  const alumnosFiltrados = alumnoId 
-    ? alumnos.filter((a: any) => a.id === alumnoId)
+  // Filtrar alumnos si se proporciona selectedAlumnoId
+  const alumnosFiltrados = selectedAlumnoId 
+    ? alumnos.filter((a: any) => a.id === selectedAlumnoId)
     : alumnos;
   
   // Calcular rango de fechas según el modo de vista - MEMOIZADO
@@ -2098,14 +2286,6 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
     }
   };
 
-  if (loadingAlumnos) {
-    return (
-      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Spinner size="large" />
-      </Layout>
-    );
-  }
-
   if (alumnos.length === 0) {
     return (
       <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
@@ -2119,6 +2299,13 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
 
   return (
     <Layout style={{ flex: 1 }}>
+      {/* Filtro de alumnos */}
+      <FiltroAlumnos 
+        alumnos={alumnos}
+        selectedAlumnoId={selectedAlumnoId}
+        setSelectedAlumnoId={setSelectedAlumnoId}
+      />
+      
       {/* Barra de búsqueda por fecha */}
       <View style={{ padding: 16, backgroundColor: '#F8FAFB', borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2164,11 +2351,33 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
           />
         }
       >
-        {loadingAsistencias ? (
-          <View style={{ padding: 40, alignItems: 'center' }}>
-            <Spinner size="large" />
-            <Text appearance="hint" style={{ marginTop: 12 }}>Cargando asistencias...</Text>
-          </View>
+        {loadingAsistencias && !refreshing ? (
+          // Skeleton loading
+          <>
+            {[1, 2, 3].map((i) => (
+              <Card
+                key={i}
+                disabled
+                style={{ 
+                  marginBottom: 16, 
+                  borderRadius: 16, 
+                  backgroundColor: '#F8FAFB',
+                  borderWidth: 1,
+                  borderColor: '#E6EBF0'
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <View style={{ flex: 1, gap: 8 }}>
+                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                  </View>
+                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                </View>
+                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+              </Card>
+            ))}
+          </>
         ) : (
           alumnosFiltrados.map((alumno: any) => {
             const asistencias = asistenciasPorAlumno[alumno.id] || [];
@@ -2182,7 +2391,7 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
             const mostrarEstadisticas = viewMode !== 'dia' || asistencias.length > 1;
 
             return (
-              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 12 }}>
+              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
                 {/* Header con nombre del alumno */}
                 <View style={{ marginBottom: 12 }}>
                   <Text category="h6" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
@@ -2298,6 +2507,8 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
             );
           })
         )}
+        {/* Spacer para contenido visible sobre la barra */}
+        <View style={{ height: 80 }} />
       </ScrollView>
 
       {/* Date Picker Modal con opciones */}
@@ -2508,9 +2719,15 @@ function AsistenciasTab({ alumnoId }: { alumnoId?: string }) {
 }
 
 // 📋 SEGUIMIENTO DIARIO TAB (Solo para nivel MATERNAL)
-function SeguimientoTab() {
-  const { data: alumnosData, loading: loadingAlumnos } = useQuery(GET_ALUMNOS_TUTOR);
-  const [selectedAlumno, setSelectedAlumno] = useState<string | null>(null);
+function SeguimientoTab({ 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId 
+}: { 
+  alumnos: any[]; 
+  selectedAlumnoId: string | null;
+  setSelectedAlumnoId: (id: string | null) => void;
+}) {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -2519,21 +2736,20 @@ function SeguimientoTab() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<'desde' | 'hasta'>('desde');
   
-  const alumnos = alumnosData?.alumnosTutor || [];
   const alumnosMaternalOnly = alumnos.filter((a: any) => a.nivel === 'MATERNAL');
   
   // Si hay alumnos MATERNAL pero no hay seleccionado, seleccionar el primero automáticamente
   useEffect(() => {
-    if (alumnosMaternalOnly.length > 0 && !selectedAlumno) {
-      setSelectedAlumno(alumnosMaternalOnly[0].id);
+    if (alumnosMaternalOnly.length > 0 && !selectedAlumnoId) {
+      setSelectedAlumnoId(alumnosMaternalOnly[0].id);
     }
   }, [alumnosMaternalOnly.length]);
   
-  const shouldSkip = !selectedAlumno;
+  const shouldSkip = !selectedAlumnoId;
   
   const { data, loading, refetch } = useQuery(GET_SEGUIMIENTO_DIARIO, {
     variables: {
-      alumnoId: selectedAlumno,
+      alumnoId: selectedAlumnoId,
       fechaInicio: fechaDesde.toISOString(),
       fechaFin: fechaHasta.toISOString()
     },
@@ -2544,7 +2760,7 @@ function SeguimientoTab() {
   
   // DEBUG: Ver datos de seguimiento
   console.log('🔍 DEBUG Seguimiento - Variables:', {
-    alumnoId: selectedAlumno,
+    alumnoId: selectedAlumnoId,
     fechaInicio: fechaDesde.toISOString(),
     fechaFin: fechaHasta.toISOString()
   });
@@ -2556,14 +2772,6 @@ function SeguimientoTab() {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-  
-  if (loadingAlumnos) {
-    return (
-      <Layout style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Spinner size="large" />
-      </Layout>
-    );
-  }
   
   if (alumnosMaternalOnly.length === 0) {
     return (
@@ -2581,25 +2789,12 @@ function SeguimientoTab() {
   
   return (
     <Layout style={{ flex: 1 }} level="2">
-      {/* Selector de alumno MATERNAL (siempre visible) */}
-      <View style={{ backgroundColor: '#FFFFFF', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
-        
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {alumnosMaternalOnly.map((alumno: any) => (
-              <Button
-                key={alumno.id}
-                size="small"
-                appearance={selectedAlumno === alumno.id ? 'filled' : 'outline'}
-                onPress={() => setSelectedAlumno(alumno.id)}
-                style={{ borderRadius: 12 }}
-              >
-                {`${alumno.nombre} ${alumno.apellido}`}
-              </Button>
-            ))}
-          </View>
-        </ScrollView>
-      </View>
+      {/* Selector de alumno MATERNAL */}
+      <FiltroAlumnos 
+        alumnos={alumnosMaternalOnly}
+        selectedAlumnoId={selectedAlumnoId}
+        setSelectedAlumnoId={setSelectedAlumnoId}
+      />
       
       {/* Indicador de nivel */}
       <View style={{ backgroundColor: '#E6F7F4', padding: 8 }}>
@@ -2610,7 +2805,7 @@ function SeguimientoTab() {
       
       <ScrollView 
         style={{ flex: 1 }} 
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -2620,13 +2815,35 @@ function SeguimientoTab() {
           />
         }
       >
-        {loading ? (
-          <View style={{ padding: 40, alignItems: 'center' }}>
-            <Spinner size="large" />
-            <Text appearance="hint" style={{ marginTop: 12 }}>Cargando seguimiento...</Text>
-          </View>
+        {loading && !refreshing ? (
+          // Skeleton loading
+          <>
+            {[1, 2, 3].map((i) => (
+              <Card
+                key={i}
+                disabled
+                style={{ 
+                  marginBottom: 16, 
+                  borderRadius: 16, 
+                  backgroundColor: '#F8FAFB',
+                  borderWidth: 1,
+                  borderColor: '#E6EBF0'
+                }}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <View style={{ flex: 1, gap: 8 }}>
+                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                  </View>
+                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                </View>
+                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+              </Card>
+            ))}
+          </>
         ) : seguimientos.length === 0 ? (
-          <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB' }}>
+          <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>Sin seguimiento registrado</Text>
               <Text appearance="hint">No hay registros de seguimiento diario en este período</Text>
@@ -2641,7 +2858,7 @@ function SeguimientoTab() {
               return (
                 <Card 
                   key={seguimiento.id} 
-                  style={{ marginBottom: 12, borderRadius: 12, borderLeftWidth: 4, borderLeftColor: '#00BFA5' }}
+                  style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0', borderLeftWidth: 4, borderLeftColor: '#00BFA5' }}
                   onPress={() => setExpandedDays(prev => ({ ...prev, [seguimiento.id]: !prev[seguimiento.id] }))}
                 >
                   {/* Header compacto - siempre visible */}
@@ -3068,7 +3285,7 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
       <Layout style={{ padding: 20 }}>
         
         {/* Sección: Datos del Tutor */}
-        <Card style={{ marginBottom: 20, borderRadius: 12 }}>
+        <Card style={{ marginBottom: 20, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <Text category="h6" style={{ color: '#2E3A59' }}>Mis Datos</Text>
             {!editingTutor && (
@@ -3161,7 +3378,7 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
         {/* Sección: Alumnos */}
         <Text category="h6" style={{ marginBottom: 12, color: '#2E3A59' }}>Mis Hijos</Text>
         {alumnos.map((alumno: any) => (
-          <Card key={alumno.id} style={{ marginBottom: 12, borderRadius: 12 }}>
+          <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text category="s1" style={{ color: '#2E3A59' }}>
                 {alumno.apellido} {alumno.nombre}
@@ -3284,7 +3501,7 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
           status="danger"
           accessoryLeft={(props) => <Icon {...props} name="log-out-outline" />}
           onPress={onLogout}
-          style={{ marginTop: 20 }}
+          style={{ marginTop: 20, marginBottom: 100 }}
         >
           Cerrar Sesión
         </Button>
@@ -3309,11 +3526,20 @@ const formatearFechaLegible = (fechaString: string) => {
 };
 
 // 🏠 DASHBOARD TAB - Feed tipo Instagram/Facebook
-function DashboardTab({ alumnos }: { alumnos: any[] }) {
+function DashboardTab({ 
+  alumnos, 
+  selectedAlumnoId, 
+  setSelectedAlumnoId,
+  setActiveTab
+}: { 
+  alumnos: any[]; 
+  selectedAlumnoId: string | null;
+  setSelectedAlumnoId: (id: string | null) => void;
+  setActiveTab: (tab: string) => void;
+}) {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({});
   const [filtroTipo, setFiltroTipo] = useState<string[]>(['MENSAJE', 'ASISTENCIA', 'EVALUACION', 'SEGUIMIENTO']);
-  const [filtroAlumno, setFiltroAlumno] = useState<string | null>(null);
   const [mostrarModalFiltros, setMostrarModalFiltros] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null); // null = hoy
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -3373,6 +3599,13 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
   const fechaDesde = selectedDate 
     ? formatearFechaLocal(new Date(selectedDate.getTime() - 7 * 24 * 60 * 60 * 1000))
     : formatearFechaLocal(fechaBaseInicio);
+  
+  console.log('🗓️ FECHAS ASISTENCIAS:', {
+    fechaBaseFin: fechaBaseFin.toISOString(),
+    hoy,
+    fechaDesde,
+    selectedDate: selectedDate?.toISOString() || 'null'
+  });
     
   const { data: asistenciasData, loading: loadingAsistencias } = useQuery(GET_ASISTENCIAS, {
     variables: { desde: fechaDesde, hasta: hoy }
@@ -3381,19 +3614,16 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
   // Calificaciones recientes (últimos 30 días desde la fecha seleccionada para ver más datos)
   const fechaLimite = new Date(fechaBaseFin.getTime() - 30 * 24 * 60 * 60 * 1000);
   
-  // Query de calificaciones - ahora solo obtenemos del primer alumno o null
-  const primerAlumnoId = alumnos.length > 0 ? alumnos[0].id : null;
-  const { data: calificacionesData, loading: loadingCalificaciones } = useQuery(GET_CALIFICACIONES, {
-    variables: { alumnoId: primerAlumnoId },
-    skip: !primerAlumnoId
-  });
+  // Query de calificaciones - NULL para obtener todos los alumnos del tutor
+  const { data: calificacionesData, loading: loadingCalificaciones } = useQuery(GET_CALIFICACIONES);
   
-  // Seguimiento (solo si hay alumnos MATERNAL)
-  const tieneMaternalAlumno = alumnos.some((a: any) => a.nivel === 'MATERNAL');
+  // Seguimiento - Por ahora solo obtenemos los seguimientos consultando individualmente en el frontend
+  // Esto requeriría hacer múltiples queries o modificar el backend para aceptar múltiples alumnos
   const alumnosMaternalIds = alumnos.filter((a: any) => a.nivel === 'MATERNAL').map((a: any) => a.id);
   const primerMaternalId = alumnosMaternalIds.length > 0 ? alumnosMaternalIds[0] : null;
   
-  const { data: seguimientosData, loading: loadingSeguimientos } = useQuery(GET_SEGUIMIENTO_DIARIO, {
+  // Por ahora solo consultamos el primero - TODO: mejorar para consultar todos
+  const { data: seguimientosDataRaw, loading: loadingSeguimientos } = useQuery(GET_SEGUIMIENTO_DIARIO, {
     variables: {
       alumnoId: primerMaternalId,
       fechaInicio: fechaDesde,
@@ -3401,6 +3631,13 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
     },
     skip: !primerMaternalId
   });
+  
+  // Adaptar formato de seguimientos
+  const seguimientosData = React.useMemo(() => {
+    return {
+      seguimientosDiariosPorAlumno: seguimientosDataRaw?.seguimientosDiariosPorAlumno || []
+    };
+  }, [seguimientosDataRaw]);
   
   // Crear feed unificado de "posts"
   const feedPosts = React.useMemo(() => {
@@ -3550,15 +3787,15 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
     postsFiltrados = postsFiltrados.filter(post => filtroTipo.includes(post.tipo));
     
     // Filtrar por alumno
-    if (filtroAlumno) {
+    if (selectedAlumnoId) {
       postsFiltrados = postsFiltrados.filter(post => {
         if (post.tipo === 'MENSAJE' && !post.alumno) return true; // Mensajes generales siempre
-        return post.alumno?.id === filtroAlumno;
+        return post.alumno?.id === selectedAlumnoId;
       });
     }
     
     return postsFiltrados;
-  }, [feedPosts, filtroTipo, filtroAlumno]);
+  }, [feedPosts, filtroTipo, selectedAlumnoId]);
   
   // Agrupar posts por alumno
   const postsPorAlumno = React.useMemo(() => {
@@ -3683,6 +3920,13 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
   
   return (
     <Layout style={{ flex: 1 }} level="2">
+      {/* Filtro de alumnos */}
+      <FiltroAlumnos 
+        alumnos={alumnos}
+        selectedAlumnoId={selectedAlumnoId}
+        setSelectedAlumnoId={setSelectedAlumnoId}
+      />
+      
       <ScrollView
         refreshControl={
           <RefreshControl
@@ -3693,279 +3937,364 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
           />
         }
       >
-        {/* Header de bienvenida */}
-        <View style={{ margin: 16, marginBottom: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            {/* Texto indicador */}
-            <Text appearance="hint" style={{ fontStyle: 'italic', fontSize: 13 }}>
-              {selectedDate 
-                ? 'Visualización día específico'
-                : 'Visualización últimos 3 días'
-              }
-            </Text>
-            
-            {/* Botón de Filtros */}
-            <Button
-              size="small"
-              appearance="outline"
-              accessoryLeft={(props) => <Icon {...props} name="funnel-outline" />}
-              onPress={() => setMostrarModalFiltros(true)}
-            >
-              {filtroTipo.length < 4 || filtroAlumno || selectedDate ? '●' : ''}
-            </Button>
-          </View>
+        {/* Header de bienvenida con fecha */}
+        <View style={{ padding: 16, paddingBottom: 8 }}>
+          <Text category="h6" style={{ color: '#2E3A59', marginBottom: 4 }}>
+            {selectedDate ? '📅 Actividad del día' : '🏠 Novedades de Hoy'}
+          </Text>
+          <Text appearance="hint" style={{ fontSize: 13 }}>
+            {selectedDate 
+              ? new Date(selectedDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+              : new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+            }
+          </Text>
         </View>
-        
-        {/* Feed de posts */}
-        <View style={{ marginTop: 5, paddingHorizontal: 15 , paddingBottom: 16 }}>
-          {/* Solo mostrar mensaje si NO está cargando y no hay posts */}
-          {!loadingAsistencias && !loadingCalificaciones && !loadingSeguimientos && feedPostsFiltrados.length === 0 ? (
-            <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB', marginTop: 40 }}>
-              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <Icon name="funnel-outline" style={{ width: 60, height: 60, marginBottom: 16 }} fill="#8F9BB3" />
-                <Text category="h6" style={{ marginBottom: 8, color: '#2E3A59' }}>
-                  {feedPosts.length === 0 ? '¡Todo al día!' : 'Sin resultados'}
-                </Text>
-                <Text appearance="hint" style={{ textAlign: 'center' }}>
-                  {feedPosts.length === 0 
-                    ? 'No hay novedades por el momento' 
-                    : 'Intenta cambiar los filtros para ver más novedades'}
-                </Text>
-              </View>
-            </Card>
-          ) : feedPostsFiltrados.length > 0 ? (
-            <>
-              {/* Si NO hay fecha seleccionada, mostrar agrupado por día */}
-              {!selectedDate && postsPorDia ? (
-                <>
-                  {postsPorDia.map((dia, diaIndex) => {
-                    if (dia.posts.length === 0) return null;
-                    
-                    // Agrupar posts del día por alumno
-                    const mensajesGeneralesDelDia: any[] = [];
-                    const gruposDelDia: Record<string, any[]> = {};
-                    
-                    dia.posts.forEach(post => {
-                      if (post.tipo === 'MENSAJE' && !post.alumno) {
-                        mensajesGeneralesDelDia.push(post);
-                      } else if (post.alumno) {
-                        const alumnoId = post.alumno.id;
-                        if (!gruposDelDia[alumnoId]) {
-                          gruposDelDia[alumnoId] = [];
+
+        {/* Cards por Alumno */}
+        <View style={{ paddingHorizontal: 16, gap: 16 }}>
+          {(() => {
+            // Filtrar alumnos si hay un filtro activo
+            const alumnosFiltrados = selectedAlumnoId 
+              ? alumnos.filter((a: any) => a.id === selectedAlumnoId)
+              : alumnos;
+
+            // Calcular rango de fechas para filtrar novedades recientes
+            const fechaLimiteMensajes = selectedDate 
+              ? new Date(selectedDate.getTime() - 7 * 24 * 60 * 60 * 1000)
+              : fechaBaseInicio;
+
+            // Calcular novedades por alumno (solo recientes)
+            const alumnosConNovedades = alumnosFiltrados.map((alumno: any) => {
+              // Mensajes del alumno (solo recientes y del rango de fechas)
+              const mensajesAlumno = mensajes.filter((m: any) => {
+                const fechaMensaje = new Date(m.publicadoEn || m.creadoEn);
+                const enRango = fechaMensaje >= fechaLimiteMensajes && fechaMensaje <= fechaBaseFin;
+                
+                // Verificar si el alumno es destinatario
+                if (m.destinatarioIds && Array.isArray(m.destinatarioIds)) {
+                  return enRango && m.destinatarioIds.includes(alumno.id);
+                }
+                
+                // Si no tiene destinatarios específicos, es mensaje general (no contar por alumno)
+                return false;
+              });
+              
+              // Asistencias del alumno (procesar estructura correcta de asistenciasTutor)
+              const asistenciasAlumno: any[] = [];
+              if (asistenciasData?.asistenciasTutor) {
+                asistenciasData.asistenciasTutor.forEach((asistencia: any) => {
+                  asistencia.registros.forEach((registro: any) => {
+                    if (registro.alumnoId === alumno.id) {
+                      // Extraer solo la fecha (YYYY-MM-DD) del formato ISO
+                      const fechaSoloDate = asistencia.fecha.split('T')[0];
+                      
+                      asistenciasAlumno.push({
+                        alumnoId: registro.alumnoId,
+                        fecha: fechaSoloDate,
+                        presente: registro.estado === 'PRESENTE',
+                        estado: registro.estado,
+                        observaciones: registro.observaciones
+                      });
+                    }
+                  });
+                });
+              }
+              
+              // Evaluaciones del alumno (filtrar por fecha límite de 30 días y por alumno)
+              let evaluacionesAlumno: any[] = [];
+              if (calificacionesData?.calificacionesTutor) {
+                calificacionesData.calificacionesTutor.forEach((materia: any) => {
+                  if (materia.evaluaciones) {
+                    materia.evaluaciones.forEach((evaluacion: any) => {
+                      const fechaEval = new Date(evaluacion.fecha);
+                      const enRango = fechaEval >= fechaLimite && fechaEval <= fechaBaseFin;
+                      
+                      // Verificar si esta evaluación tiene una nota para este alumno
+                      if (enRango && evaluacion.notas) {
+                        const tieneNotaAlumno = evaluacion.notas.some((nota: any) => 
+                          nota.alumnoId === alumno.id
+                        );
+                        if (tieneNotaAlumno) {
+                          evaluacionesAlumno.push(evaluacion);
                         }
-                        gruposDelDia[alumnoId].push(post);
                       }
                     });
+                  }
+                });
+              }
+              
+              // Seguimientos del alumno (ya vienen filtrados por fecha desde el query)
+              const seguimientosAlumno = seguimientosData?.seguimientosDiariosPorAlumno?.filter((s: any) => 
+                s.alumnoId === alumno.id
+              ) || [];
+              
+              // Verificar si tiene asistencia de HOY
+              const hoyStr = formatearFechaLocal(new Date());
+              const asistenciaHoy = asistenciasAlumno.find((a: any) => a.fecha === hoyStr);
+              const tieneAsistenciaHoy = !!asistenciaHoy;
+              
+              // Contar total de novedades (asistencia solo cuenta si tiene registro de hoy)
+              const totalNovedades = 
+                (filtroTipo.includes('MENSAJE') ? mensajesAlumno.length : 0) +
+                (filtroTipo.includes('ASISTENCIA') && tieneAsistenciaHoy ? 1 : 0) +
+                (filtroTipo.includes('EVALUACION') ? evaluacionesAlumno.length : 0) +
+                (filtroTipo.includes('SEGUIMIENTO') ? seguimientosAlumno.length : 0);
+              
+              // Debug - Mostrar para todos los alumnos, no solo los que tienen novedades
+              console.log(`📊 Novedades para ${alumno.nombre} ${alumno.apellido}:`, {
+                mensajes: mensajesAlumno.length,
+                mensajesSinLeer: mensajesAlumno.filter((m: any) => !m.leido).length,
+                asistencias: asistenciasAlumno.length,
+                asistenciaHoy: asistenciaHoy ? `${asistenciaHoy.estado} (${asistenciaHoy.fecha})` : 'Sin registro',
+                asistenciasDetalle: asistenciasAlumno.map((a: any) => ({ 
+                  fecha: a.fecha, 
+                  estado: a.estado 
+                })),
+                evaluaciones: evaluacionesAlumno.length,
+                seguimientos: seguimientosAlumno.length,
+                total: totalNovedades
+              });
+              
+              return {
+                ...alumno,
+                mensajes: mensajesAlumno,
+                asistencias: asistenciasAlumno,
+                evaluaciones: evaluacionesAlumno,
+                seguimientos: seguimientosAlumno,
+                totalNovedades
+              };
+            });
+
+            // Ordenar: primero los que tienen novedades, luego los que no
+            const alumnosOrdenados = alumnosConNovedades.sort((a, b) => {
+              if (a.totalNovedades > 0 && b.totalNovedades === 0) return -1;
+              if (a.totalNovedades === 0 && b.totalNovedades > 0) return 1;
+              return b.totalNovedades - a.totalNovedades;
+            });
+
+            return alumnosOrdenados.map((alumno: any) => (
+              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
+                {/* Header del Alumno */}
+                <View style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  gap: 12,
+                  marginBottom: 16
+                }}>
+                  <View style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 24,
+                    backgroundColor: alumno.totalNovedades > 0 ? '#00BFA5' : '#CBD5E0',
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' }}>
+                      {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text category="s1" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                      {alumno.nombre} {alumno.apellido}
+                    </Text>
+                    <Text appearance="hint" category="c1">
+                      {alumno.nivel} {alumno.division ? `· ${alumno.division}` : ''}
+                    </Text>
+                  </View>
+                  {alumno.totalNovedades > 0 && (
+                    <View style={{
+                      backgroundColor: '#00BFA5',
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 20
+                    }}>
+                      <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 }}>
+                        {alumno.totalNovedades}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Grid de Novedades */}
+                <View style={{ gap: 8 }}>
+                  {/* Mensajes */}
+                  {filtroTipo.includes('MENSAJE') && (
+                    <Card 
+                      style={{ 
+                        borderRadius: 12, 
+                        borderLeftWidth: 3, 
+                        borderLeftColor: '#3B82F6',
+                        backgroundColor: alumno.mensajes.length > 0 ? '#EFF6FF' : '#F9FAFB'
+                      }}
+                      onPress={() => {
+                        if (alumno.mensajes.length > 0) {
+                          setSelectedAlumnoId(alumno.id);
+                          setActiveTab('mensajes');
+                        }
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Icon name="email-outline" fill="#3B82F6" style={{ width: 20, height: 20 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                            Mensajes
+                          </Text>
+                        </View>
+                        <Text style={{ 
+                          color: alumno.mensajes.length > 0 ? '#3B82F6' : '#9CA3AF',
+                          fontWeight: 'bold',
+                          fontSize: 16
+                        }}>
+                          {alumno.mensajes.length > 0 ? alumno.mensajes.length : 'Sin novedades'}
+                        </Text>
+                      </View>
+                      {alumno.mensajes.length > 0 && (
+                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
+                          {alumno.mensajes.filter((m: any) => !m.leido).length} sin leer
+                        </Text>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Asistencias */}
+                  {filtroTipo.includes('ASISTENCIA') && (() => {
+                    // Buscar la asistencia de HOY para este alumno
+                    const hoyStr = formatearFechaLocal(new Date());
+                    const asistenciaHoy = alumno.asistencias.find((a: any) => a.fecha === hoyStr);
+                    
+                    // Determinar estado
+                    const tieneAsistenciaHoy = !!asistenciaHoy;
+                    const estaPresente = asistenciaHoy?.presente || false;
                     
                     return (
-                      <View key={diaIndex} style={{ marginBottom: 32 }}>
-                        {/* Header del día - Minimalista */}
-                        <View style={{ 
-                          paddingHorizontal: 16,
-                          paddingVertical: 12,
-                          marginBottom: 16,
-                          borderLeftWidth: 4,
-                          borderLeftColor: '#00BFA5',
-                          backgroundColor: '#F8F9FA'
-                        }}>
-                          <Text style={{ 
-                            color: '#2E3A59', 
-                            fontSize: 18, 
-                            fontWeight: 'bold',
-                            marginBottom: 2
-                          }}>
-                            {dia.label}
-                          </Text>
-                          <Text style={{ 
-                            color: '#718096', 
-                            fontSize: 13
-                          }}>
-                            {dia.posts.length} {dia.posts.length === 1 ? 'novedad' : 'novedades'}
-                          </Text>
-                        </View>
-                        
-                        {/* Mensajes generales del día */}
-                        {mensajesGeneralesDelDia.map((post) => (
-                          <View key={post.id} style={{ marginBottom: 12 }}>
-                            <MensajePost 
-                              mensaje={post.contenido} 
-                              expanded={expandedPosts[post.id]} 
-                              onToggle={() => togglePost(post.id, post)} 
-                            />
+                      <Card 
+                        style={{ 
+                          borderRadius: 12, 
+                          borderLeftWidth: 3, 
+                          borderLeftColor: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
+                          backgroundColor: tieneAsistenciaHoy 
+                            ? (estaPresente ? '#ECFDF5' : '#FEE2E2') 
+                            : '#F9FAFB'
+                        }}
+                        onPress={() => {
+                          setSelectedAlumnoId(alumno.id);
+                          setActiveTab('asistencias');
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Icon 
+                            name={tieneAsistenciaHoy ? (estaPresente ? "checkmark-circle-outline" : "close-circle-outline") : "alert-circle-outline"} 
+                            fill={tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF'} 
+                            style={{ width: 20, height: 20 }} 
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                              Asistencia Hoy
+                            </Text>
                           </View>
-                        ))}
-                        
-                        {/* Posts por alumno del día */}
-                        {alumnos.map((alumno: any) => {
-                          const postsDelAlumno = gruposDelDia[alumno.id] || [];
-                          if (postsDelAlumno.length === 0) return null;
-                          
-                          return (
-                            <View key={`${diaIndex}-${alumno.id}`} style={{ marginBottom: 20 }}>
-                              {/* Encabezado del alumno - Fondo oscuro */}
-                              <View style={{ 
-                                paddingHorizontal: 16,
-                                paddingVertical: 10,
-                                marginBottom: 8,
-                                backgroundColor: '#2E3A59',
-                                borderRadius: 12
-                              }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                  <View style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: 16,
-                                    backgroundColor: '#00BFA5',
-                                    justifyContent: 'center',
-                                    alignItems: 'center'
-                                  }}>
-                                    <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 'bold' }}>
-                                      {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
-                                    </Text>
-                                  </View>
-                                  <View style={{ flex: 1 }}>
-                                    <Text style={{ 
-                                      color: '#FFFFFF', 
-                                      fontSize: 15, 
-                                      fontWeight: '600' 
-                                    }}>
-                                      {alumno.nombre} {alumno.apellido}
-                                    </Text>
-                                    <Text style={{ 
-                                      color: 'rgba(255, 255, 255, 0.7)', 
-                                      fontSize: 12
-                                    }}>
-                                      {postsDelAlumno.length} {postsDelAlumno.length === 1 ? 'registro' : 'registros'}
-                                    </Text>
-                                  </View>
-                                </View>
-                              </View>
-                              
-                              {/* Posts del alumno */}
-                              {postsDelAlumno.map((post: any, index: number) => (
-                                <View key={post.id} style={{ marginBottom: index < postsDelAlumno.length - 1 ? 10 : 0 }}>
-                                  {post.tipo === 'MENSAJE' && (
-                                    <MensajePost 
-                                      mensaje={post.contenido} 
-                                      expanded={expandedPosts[post.id]} 
-                                      onToggle={() => togglePost(post.id, post)} 
-                                    />
-                                  )}
-                                  {post.tipo === 'ASISTENCIA' && <AsistenciaPost asistencia={post.contenido} alumno={post.alumno} />}
-                                  {post.tipo === 'EVALUACION' && <EvaluacionPost evaluacion={post.contenido} alumno={post.alumno} />}
-                                  {post.tipo === 'SEGUIMIENTO' && (
-                                    <SeguimientoPost 
-                                      seguimiento={post.contenido} 
-                                      alumno={post.alumno}
-                                      expanded={expandedPosts[post.id]}
-                                      onToggle={() => togglePost(post.id, post)}
-                                    />
-                                  )}
-                                </View>
-                              ))}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    );
-                  })}
-                </>
-              ) : (
-                <>
-              {/* Si HAY fecha seleccionada, mostrar agrupado por alumno (vista anterior) */}
-              {/* Mensajes generales primero */}
-              {postsPorAlumno.mensajesGenerales.map((post) => (
-                <View key={post.id} style={{ marginBottom: 12 }}>
-                  <MensajePost 
-                    mensaje={post.contenido} 
-                    expanded={expandedPosts[post.id]} 
-                    onToggle={() => togglePost(post.id, post)} 
-                  />
-                </View>
-              ))}
-              
-              {/* Luego posts agrupados por alumno */}
-              {alumnos.map((alumno: any, alumnoIndex: number) => {
-                const postsDelAlumno = postsPorAlumno.grupos[alumno.id] || [];
-                if (postsDelAlumno.length === 0) return null;
-                
-                return (
-                  <View key={alumno.id} style={{ marginBottom: 24 }}>
-                    {/* Encabezado del alumno - Fondo oscuro */}
-                    <View style={{ 
-                      paddingHorizontal: 16,
-                      paddingVertical: 12,
-                      marginBottom: 12,
-                      backgroundColor: '#2E3A59',
-                      borderRadius: 12
-                    }}>
-                      <View style={{ 
-                        flexDirection: 'row', 
-                        alignItems: 'center',
-                        gap: 12
-                      }}>
-                        <View style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 18,
-                          backgroundColor: '#00BFA5',
-                          justifyContent: 'center',
-                          alignItems: 'center'
-                        }}>
-                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' }}>
-                            {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
-                          </Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
                           <Text style={{ 
-                            color: '#FFFFFF', 
-                            fontSize: 16, 
-                            fontWeight: '600',
-                            marginBottom: 2
+                            color: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
+                            fontWeight: 'bold',
+                            fontSize: 14
                           }}>
-                            {alumno.nombre} {alumno.apellido}
-                          </Text>
-                          <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }}>
-                            {alumno.nivel} • {postsDelAlumno.length} {postsDelAlumno.length === 1 ? 'registro' : 'registros'}
+                            {tieneAsistenciaHoy 
+                              ? (estaPresente ? 'PRESENTE' : 'AUSENTE')
+                              : 'Sin registro'}
                           </Text>
                         </View>
+                        {tieneAsistenciaHoy && asistenciaHoy.observaciones && (
+                          <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
+                            {asistenciaHoy.observaciones}
+                          </Text>
+                        )}
+                      </Card>
+                    );
+                  })()}
+
+                  {/* Evaluaciones */}
+                  {filtroTipo.includes('EVALUACION') && (
+                    <Card 
+                      style={{ 
+                        borderRadius: 12, 
+                        borderLeftWidth: 3, 
+                        borderLeftColor: '#F59E0B',
+                        backgroundColor: alumno.evaluaciones.length > 0 ? '#FFFBEB' : '#F9FAFB'
+                      }}
+                      onPress={() => {
+                        if (alumno.evaluaciones.length > 0) {
+                          setSelectedAlumnoId(alumno.id);
+                          setActiveTab('evaluaciones');
+                        }
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Icon name="star-outline" fill="#F59E0B" style={{ width: 20, height: 20 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                            Evaluaciones
+                          </Text>
+                        </View>
+                        <Text style={{ 
+                          color: alumno.evaluaciones.length > 0 ? '#F59E0B' : '#9CA3AF',
+                          fontWeight: 'bold',
+                          fontSize: 16
+                        }}>
+                          {alumno.evaluaciones.length > 0 ? alumno.evaluaciones.length : 'Sin novedades'}
+                        </Text>
                       </View>
-                    </View>
-                    
-                    {/* Posts del alumno */}
-                    {postsDelAlumno.map((post: any, index: number) => (
-                      <View key={post.id} style={{ marginBottom: index < postsDelAlumno.length - 1 ? 10 : 0 }}>
-                        {post.tipo === 'MENSAJE' && (
-                          <MensajePost 
-                            mensaje={post.contenido} 
-                            expanded={expandedPosts[post.id]} 
-                            onToggle={() => togglePost(post.id, post)} 
-                          />
-                        )}
-                        {post.tipo === 'ASISTENCIA' && (
-                          <AsistenciaPost asistencia={post.contenido} alumno={post.alumno} />
-                        )}
-                        {post.tipo === 'EVALUACION' && (
-                          <EvaluacionPost evaluacion={post.contenido} alumno={post.alumno} />
-                        )}
-                        {post.tipo === 'SEGUIMIENTO' && (
-                          <SeguimientoPost 
-                            seguimiento={post.contenido} 
-                            alumno={post.alumno}
-                            expanded={expandedPosts[post.id]}
-                            onToggle={() => togglePost(post.id, post)}
-                          />
-                        )}
+                      {alumno.evaluaciones.length > 0 && (
+                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
+                          Últimas calificaciones
+                        </Text>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Seguimientos */}
+                  {filtroTipo.includes('SEGUIMIENTO') && alumno.nivel === 'MATERNAL' && (
+                    <Card 
+                      style={{ 
+                        borderRadius: 12, 
+                        borderLeftWidth: 3, 
+                        borderLeftColor: '#8B5CF6',
+                        backgroundColor: alumno.seguimientos.length > 0 ? '#F5F3FF' : '#F9FAFB'
+                      }}
+                      onPress={() => {
+                        if (alumno.seguimientos.length > 0) {
+                          setSelectedAlumnoId(alumno.id);
+                          setActiveTab('seguimiento');
+                        }
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Icon name="heart-outline" fill="#8B5CF6" style={{ width: 20, height: 20 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                            Seguimiento
+                          </Text>
+                        </View>
+                        <Text style={{ 
+                          color: alumno.seguimientos.length > 0 ? '#8B5CF6' : '#9CA3AF',
+                          fontWeight: 'bold',
+                          fontSize: 16
+                        }}>
+                          {alumno.seguimientos.length > 0 ? alumno.seguimientos.length : 'Sin novedades'}
+                        </Text>
                       </View>
-                    ))}
-                  </View>
-                );
-              })}
-              </>
-              )}
-            </>
-          ) : null}
+                      {alumno.seguimientos.length > 0 && (
+                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
+                          Actividades del día
+                        </Text>
+                      )}
+                    </Card>
+                  )}
+                </View>
+              </Card>
+            ));
+          })()}
         </View>
+        
+        <View style={{ height: 80 }} />
       </ScrollView>
       
       {/* Modal de Filtros */}
@@ -4135,79 +4464,7 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
                 </TouchableOpacity>
               </View>
               
-              {/* Filtros por alumno */}
-              {alumnos.length > 1 && (
-                <>
-                  <Divider style={{ marginBottom: 16 }} />
-                  <Text category="s1" style={{ marginBottom: 12, color: '#2E3A59' }}>Alumno</Text>
-                  <View style={{ gap: 10, marginBottom: 16 }}>
-                    <TouchableOpacity
-                      onPress={() => setFiltroAlumno(null)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        padding: 12,
-                        borderRadius: 12,
-                        backgroundColor: !filtroAlumno ? '#E6F7F4' : '#F8FAFB',
-                        borderWidth: 1,
-                        borderColor: !filtroAlumno ? '#00BFA5' : '#E4E9F2'
-                      }}
-                    >
-                      <View style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 16,
-                        backgroundColor: '#E6F7F4',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginRight: 12
-                      }}>
-                        <Icon name="people" fill="#00BFA5" style={{ width: 20, height: 20 }} />
-                      </View>
-                      <Text style={{ flex: 1, color: '#2E3A59' }}>Todos los alumnos</Text>
-                      {!filtroAlumno && (
-                        <Icon name="checkmark-circle-2" fill="#00BFA5" style={{ width: 24, height: 24 }} />
-                      )}
-                    </TouchableOpacity>
-                    
-                    {alumnos.map((alumno: any) => (
-                      <TouchableOpacity
-                        key={alumno.id}
-                        onPress={() => setFiltroAlumno(alumno.id)}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          padding: 12,
-                          borderRadius: 12,
-                          backgroundColor: filtroAlumno === alumno.id ? '#E6F7F4' : '#F8FAFB',
-                          borderWidth: 1,
-                          borderColor: filtroAlumno === alumno.id ? '#00BFA5' : '#E4E9F2'
-                        }}
-                      >
-                        <View style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 16,
-                          backgroundColor: '#00BFA5',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          marginRight: 12
-                        }}>
-                          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' }}>
-                            {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
-                          </Text>
-                        </View>
-                        <Text style={{ flex: 1, color: '#2E3A59' }}>
-                          {alumno.nombre} {alumno.apellido}
-                        </Text>
-                        {filtroAlumno === alumno.id && (
-                          <Icon name="checkmark-circle-2" fill="#00BFA5" style={{ width: 24, height: 24 }} />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
+              {/* Filtros por alumno - ELIMINADO (ahora está en el header) */}
               
               {/* Filtro por fecha */}
               <Divider style={{ marginBottom: 16 }} />
@@ -4290,7 +4547,7 @@ function DashboardTab({ alumnos }: { alumnos: any[] }) {
                   appearance="outline"
                   onPress={() => {
                     setFiltroTipo(['MENSAJE', 'ASISTENCIA', 'EVALUACION', 'SEGUIMIENTO']);
-                    setFiltroAlumno(null);
+                    setSelectedAlumnoId(null);
                     setSelectedDate(null);
                   }}
                 >
@@ -4682,6 +4939,11 @@ function AppContent() {
   const [showSplash, setShowSplash] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.3)).current;
+  const notificationListener = useRef<any>();
+  const responseListener = useRef<any>();
+  
+  // 🔔 Mutación para guardar el push token
+  const [updatePushToken] = useMutation(UPDATE_PUSH_TOKEN);
 
   useEffect(() => {
     // Animación del splash
@@ -4712,6 +4974,30 @@ function AppContent() {
     }, 2500);
   }, []);
 
+  // 🔔 useEffect para manejar notificaciones entrantes
+  useEffect(() => {
+    // Listener cuando llega una notificación (app en foreground)
+    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+      console.log('🔔 Notificación recibida:', notification);
+    });
+
+    // Listener cuando el usuario toca la notificación
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('👆 Usuario tocó la notificación:', response);
+      // Aquí podrías navegar a una sección específica de la app
+      // Por ejemplo, si es un mensaje nuevo, ir a la pestaña de mensajes
+    });
+
+    return () => {
+      if (notificationListener.current) {
+        Notifications.removeNotificationSubscription(notificationListener.current);
+      }
+      if (responseListener.current) {
+        Notifications.removeNotificationSubscription(responseListener.current);
+      }
+    };
+  }, []);
+
   const checkAuth = async () => {
     try {
       const token = await AsyncStorage.getItem('authToken');
@@ -4723,12 +5009,74 @@ function AppContent() {
     }
   };
 
-  const handleLogin = () => setIsAuthenticated(true);
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+    // Registrar push token después del login
+    registerForPushNotifications();
+  };
   
   const handleLogout = async () => {
     await AsyncStorage.removeItem('authToken');
     await AsyncStorage.removeItem('tutorData');
     setIsAuthenticated(false);
+  };
+
+  // 🔔 Función para registrar notificaciones push
+  const registerForPushNotifications = async () => {
+    try {
+      // Solo funciona en dispositivos físicos
+      if (!Device.isDevice) {
+        console.log('Las notificaciones push solo funcionan en dispositivos físicos');
+        return;
+      }
+
+      // Obtener permisos
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        console.log('Permisos de notificación denegados');
+        return;
+      }
+
+      // Obtener el token push
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      
+      console.log('📱 Push token obtenido:', token);
+
+      // Guardar el token localmente
+      await AsyncStorage.setItem('expoPushToken', token);
+
+      // Intentar guardar el token en el backend (solo si está disponible)
+      try {
+        await updatePushToken({
+          variables: { token }
+        });
+        console.log('✅ Token push guardado en el backend');
+      } catch (error: any) {
+        // Si el backend aún no tiene la mutación, solo mostrar advertencia
+        console.warn('⚠️ Backend aún no soporta push tokens. Token guardado localmente:', token);
+        console.warn('Implementa la mutación updateTutorPushToken en el backend');
+      }
+
+      // Configurar canal de notificaciones para Android
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('default', {
+          name: 'default',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#00BFA5',
+        });
+      }
+    } catch (error) {
+      console.error('Error registrando notificaciones:', error);
+    }
   };
 
   // Mostrar splash screen
