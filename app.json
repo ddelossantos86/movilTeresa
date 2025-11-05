@@ -30,8 +30,7 @@
         "ACCESS_NETWORK_STATE",
         "POST_NOTIFICATIONS"
       ],
-      "networkSecurityConfig": "./network-security-config.xml",
-      "googleServicesFile": "./google-services.json"
+      "networkSecurityConfig": "./network-security-config.xml"
     },
     "notification": {
       "icon": "./assets/notification-icon.png",
