@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Barra horizontal de la T -->
+  <rect x="48" y="57.599999999999994" width="96" height="19.200000000000003" rx="9.600000000000001" fill="white"/>
+  
+  <!-- Barra vertical de la T -->
+  <rect x="88.32000000000001" y="57.599999999999994" width="15.36" height="86.4" rx="7.68" fill="white"/>
+  
+  <!-- Punto decorativo -->
+  <circle cx="96" cy="153.60000000000002" r="7.68" fill="white"/>
+</svg>
