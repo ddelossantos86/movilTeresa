@@ -26,7 +26,6 @@ export const GET_MENSAJES_TUTOR = gql`
       alcance
       estado
       autorNombre
-      imagen
       publicadoEn
       creadoEn
       leido
@@ -204,7 +203,6 @@ export const GET_MENSAJES = gql`
       tipo
       alcance
       autorNombre
-      imagen
       publicadoEn
       creadoEn
       leido
