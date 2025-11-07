@@ -6,6 +6,7 @@ import * as eva from '@eva-design/eva';
 import { ApolloProvider, useMutation, useQuery, gql } from '@apollo/client';
 import { apolloClient } from './src/config/apollo';
 import { LOGIN_TUTOR, GET_MENSAJES_TUTOR, MARCAR_MENSAJE_LEIDO, GET_ALUMNOS_TUTOR, GET_ASISTENCIAS, GET_CALIFICACIONES, GET_OBSERVACIONES_INICIAL, GET_SEGUIMIENTO_DIARIO, UPDATE_TUTOR_PROFILE, UPDATE_ALUMNO_CONDICIONES, GET_TUTOR_INFO, UPDATE_PUSH_TOKEN } from './src/graphql/queries';
+import { useApolloCache } from './src/hooks/useApolloCache';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
@@ -5301,6 +5302,15 @@ function AppContent() {
   
   // 🔔 Mutación para guardar el push token
   const [updatePushToken] = useMutation(UPDATE_PUSH_TOKEN);
+
+  // 🔄 Hook para invalidar cache automáticamente
+  useApolloCache({
+    resetOnAppForeground: true,  // Resetea cuando app vuelve del background
+    resetIntervalMs: 5 * 60 * 1000,  // Resetea cada 5 minutos
+    onCacheReset: () => {
+      console.log('✅ Cache invalidado - datos frescos obtenidos');
+    },
+  });
 
   useEffect(() => {
     // Animación del splash
