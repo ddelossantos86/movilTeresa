@@ -29,29 +29,39 @@ const httpLink = createHttpLink({
   },
   // Habilitar credenciales si es necesario
   credentials: 'include',
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
 // Link de manejo de errores
-const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
+const errorLink = onError(({ graphQLErrors, networkError, operation, response }) => {
   if (graphQLErrors) {
-    graphQLErrors.forEach(({ message, locations, path }) =>
+    graphQLErrors.forEach(({ message, locations, path }) => {
       console.log(
-        `[GraphQL error]: Message: ${message}, Location: ${JSON.stringify(locations)}, Path: ${path}`
-      )
-    );
+        `❌ [GraphQL error en ${operation.operationName}]: ${message}`
+      );
+      console.log(`   Path: ${path}`);
+    });
   }
   
   if (networkError) {
-    console.log(`[Network error]: ${networkError}`);
-    console.log('Operation:', operation.operationName);
-    console.log('API URL:', API_URL);
+    console.log(`❌ [Network error]: ${networkError}`);
+    console.log(`   Operation: ${operation.operationName}`);
+    console.log(`   API URL: ${API_URL}`);
+    console.log(`   HTTP Status: ${(networkError as any).statusCode}`);
+    if ((networkError as any).result) {
+      console.log(`   Response: ${JSON.stringify((networkError as any).result).substring(0, 200)}`);
+    }
   }
 });
 
-const authLink = setContext(async (_, { headers }) => {
+const authLink = setContext(async (operation, { headers }) => {
   // Obtener el token del storage
   const token = await AsyncStorage.getItem('authToken');
   console.log('🔑 Token obtenido:', token ? `${token.substring(0, 20)}...` : 'NO HAY TOKEN');
+  console.log('📤 Enviando operación:', operation.operationName);
+  console.log('🌍 A URL:', API_URL);
   
   return {
     headers: {
@@ -64,7 +74,10 @@ const authLink = setContext(async (_, { headers }) => {
 
 export const apolloClient = new ApolloClient({
   link: errorLink.concat(authLink.concat(httpLink)),
-  cache: new InMemoryCache(),
+  cache: new InMemoryCache({
+    typePolicies: {},
+    resultCacheMaxSize: 10000000,
+  }),
   defaultOptions: {
     watchQuery: {
       fetchPolicy: 'network-only',

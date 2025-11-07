@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, SafeAreaView, ScrollView, RefreshControl, StatusBar, Modal, TouchableOpacity, Animated, Easing, Platform, LogBox, Alert } from 'react-native';
+import { View, SafeAreaView, ScrollView, RefreshControl, StatusBar, Modal, TouchableOpacity, Animated, Easing, Platform, LogBox, Alert, Image } from 'react-native';
 import { ApplicationProvider, Layout, Text, Input, Button, Card, Spinner, Divider, Icon, TopNavigation, TopNavigationAction, IconRegistry, Datepicker, Select, SelectItem, IndexPath } from '@ui-kitten/components';
 import { EvaIconsPack } from '@ui-kitten/eva-icons';
 import * as eva from '@eva-design/eva';
@@ -35,7 +35,10 @@ console.warn = (...args) => {
     (args[0].includes('Support for defaultProps') ||
      args[0].includes('unsupported configuration') ||
      args[0].includes('MeasureElement') ||
-     args[0].includes('Cannot connect to Metro'))
+     args[0].includes('Cannot connect to Metro') ||
+     args[0].includes('cache.diff') ||
+     args[0].includes('canonizeResults') ||
+     args[0].includes('Apollo'))
   ) {
     return;
   }
@@ -165,6 +168,9 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         if (data.loginTutorPassword.user) {
           await AsyncStorage.setItem('tutorData', JSON.stringify(data.loginTutorPassword.user));
         }
+        // Limpiar el cache de Apollo para que cargue datos frescos
+        await apolloClient.cache.reset();
+        console.log('🧹 Apollo cache limpiado después del login');
         onLogin();
       }
     } catch (error: any) {
@@ -660,12 +666,29 @@ function MensajesTab({
   const [showNuevoMensaje, setShowNuevoMensaje] = useState(false);
   const [responderA, setResponderA] = useState<any>(null);
   
-  const { data, loading, refetch } = useQuery(GET_MENSAJES_TUTOR, {
+  const { data, loading, error, refetch } = useQuery(GET_MENSAJES_TUTOR, {
     variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {}
   });
   const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
 
   const mensajes = data?.mensajesTutor || [];
+  
+  // Logs para debugging
+  useEffect(() => {
+    console.log('📨 [MensajesTab] Query data:', data);
+    console.log('📨 [MensajesTab] Query loading:', loading);
+    if (error) {
+      console.error('❌ [MensajesTab] Query error:', error);
+    }
+    console.log('📨 [MensajesTab] Mensajes encontrados:', mensajes.length);
+    if (mensajes.length > 0) {
+      console.log('📨 [MensajesTab] Primer mensaje:', mensajes[0]);
+      console.log('🖼️  [MensajesTab] Imagen del primer mensaje:', mensajes[0].imagen ? `Presente (${(mensajes[0].imagen.length / 1024).toFixed(2)} KB)` : 'No existe');
+      if (mensajes[0].imagen) {
+        console.log('🖼️  [MensajesTab] Primeros 100 caracteres de imagen:', mensajes[0].imagen.substring(0, 100));
+      }
+    }
+  }, [data, loading, error, mensajes.length]);
   
   // Función para obtener los alumnos por destinatarioIds
   const getAlumnosByDestinatarioIds = (destinatarioIds: string[]) => {
@@ -3525,6 +3548,231 @@ const formatearFechaLegible = (fechaString: string) => {
   return `${diaSemana}, ${dia} de ${mes} ${año}`;
 };
 
+// 📸 CARRUSEL DE POSTEOS GENERALES
+function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [carouselWidth, setCarouselWidth] = useState(0);
+  
+  console.log('🎠 CarruselPosteos render:', { 
+    mensajesCount: mensajesGenerales?.length || 0,
+    mensajes: mensajesGenerales 
+  });
+  
+  // Logs detallados de imágenes
+  useEffect(() => {
+    if (mensajesGenerales && mensajesGenerales.length > 0) {
+      console.log('🎠 CarruselPosteos - Análisis de imágenes:');
+      mensajesGenerales.forEach((post, index) => {
+        const imagen = post.contenido?.imagen;
+        const tieneImagen = !!imagen;
+        console.log(`   Post ${index} (ID: ${post.id}):`, {
+          tieneImagen,
+          tamaño: tieneImagen ? `${(imagen.length / 1024).toFixed(2)} KB` : 'N/A',
+          primeros80Chars: tieneImagen ? imagen.substring(0, 80) : 'Sin imagen'
+        });
+      });
+    }
+  }, [mensajesGenerales]);
+  
+  if (!mensajesGenerales || mensajesGenerales.length === 0) {
+    return (
+      <View style={{ paddingVertical: 16, paddingHorizontal: 12, backgroundColor: '#F0F4F8', borderRadius: 12, borderWidth: 1, borderColor: '#E6EBF0' }}>
+        <Text appearance="hint" style={{ textAlign: 'center', color: '#A0AEC0' }}>
+          Sin posteos generales disponibles
+        </Text>
+      </View>
+    );
+  }
+
+  const handleScroll = (event: any) => {
+    const contentOffsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(contentOffsetX / carouselWidth);
+    setCurrentIndex(Math.min(index, mensajesGenerales.length - 1));
+  };
+
+  return (
+    <View style={{ marginBottom: 20 }}>
+      {/* Carrusel */}
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={handleScroll}
+        onLayout={(e) => setCarouselWidth(e.nativeEvent.layout.width)}
+      >
+        {mensajesGenerales.map((post) => (
+          <View
+            key={post.id}
+            style={{
+              width: carouselWidth || 380,
+              marginHorizontal: carouselWidth ? 0 : 8,
+              paddingHorizontal: 16,
+            }}
+          >
+            <Card
+              style={{
+                borderRadius: 16,
+                overflow: 'hidden',
+                backgroundColor: '#FFFFFF',
+                borderWidth: 1,
+                borderColor: '#E6EBF0',
+              }}
+            >
+              {/* Imagen */}
+              {post.contenido.imagen ? (
+                <Image
+                  source={{ uri: post.contenido.imagen }}
+                  style={{
+                    width: '100%',
+                    height: 200,
+                    backgroundColor: '#E6EBF0',
+                  }}
+                  onError={(error) => {
+                    console.warn('🖼️❌ Error loading image for post:', post.id);
+                    console.warn('   Error:', error.nativeEvent.error);
+                    console.warn('   URI:', post.contenido.imagen?.substring(0, 100));
+                  }}
+                  onLoad={() => {
+                    console.log('🖼️✅ Image loaded successfully for post:', post.id);
+                    console.log('   Size: ' + (post.contenido.imagen?.length || 0) / 1024 + ' KB');
+                  }}
+                />
+              ) : (
+                <View
+                  style={{
+                    height: 200,
+                    backgroundColor: '#00BFA5',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    position: 'relative',
+                  }}
+                >
+                  {/* Degradado de fondo */}
+                  <LinearGradient
+                    colors={['rgba(0, 191, 165, 0.3)', 'rgba(0, 191, 165, 0.8)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                    }}
+                  />
+
+                  {/* Icono decorativo */}
+                  <Icon
+                    name="bell-outline"
+                    fill="#FFFFFF"
+                    style={{
+                      width: 60,
+                      height: 60,
+                      opacity: 0.6,
+                    }}
+                  />
+                </View>
+              )}
+
+              {/* Contenido */}
+              <View style={{ padding: 16 }}>
+                {/* Título */}
+                <Text
+                  category="h6"
+                  style={{
+                    color: '#2E3A59',
+                    marginBottom: 8,
+                    fontWeight: '700',
+                  }}
+                  numberOfLines={2}
+                >
+                  {post.contenido.titulo || 'Anuncio del Colegio'}
+                </Text>
+
+                {/* Epígrafe/Descripción */}
+                <Text
+                  appearance="hint"
+                  category="p2"
+                  style={{
+                    color: '#718096',
+                    marginBottom: 12,
+                    lineHeight: 20,
+                  }}
+                  numberOfLines={3}
+                >
+                  {post.contenido.contenido || 'Sin descripción'}
+                </Text>
+
+                {/* Meta información */}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: 8,
+                    borderTopWidth: 1,
+                    borderTopColor: '#E6EBF0',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Icon
+                      name="person-outline"
+                      fill="#CBD5E0"
+                      style={{ width: 14, height: 14 }}
+                    />
+                    <Text
+                      appearance="hint"
+                      category="c2"
+                      style={{ color: '#A0AEC0' }}
+                    >
+                      {post.contenido.autorNombre || 'Colegio'}
+                    </Text>
+                  </View>
+
+                  <Text appearance="hint" category="c2" style={{ color: '#A0AEC0' }}>
+                    {new Date(post.contenido.publicadoEn || post.contenido.creadoEn).toLocaleDateString(
+                      'es-AR',
+                      { day: 'numeric', month: 'short' }
+                    )}
+                  </Text>
+                </View>
+              </View>
+            </Card>
+          </View>
+        ))}
+      </ScrollView>
+
+      {/* Indicadores de página */}
+      {mensajesGenerales.length > 1 && (
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 12,
+          }}
+        >
+          {mensajesGenerales.map((_, index) => (
+            <View
+              key={index}
+              style={{
+                width: index === currentIndex ? 28 : 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: index === currentIndex ? '#00BFA5' : '#CBD5E0',
+              }}
+            />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 // 🏠 DASHBOARD TAB - Feed tipo Instagram/Facebook
 function DashboardTab({ 
   alumnos, 
@@ -3548,6 +3796,15 @@ function DashboardTab({
   const { data: mensajesData, refetch: refetchMensajes } = useQuery(GET_MENSAJES_TUTOR);
   const mensajes = mensajesData?.mensajesTutor || [];
   const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
+  
+  // Debugging: Loguear errores de query
+  useEffect(() => {
+    console.log('📧 [Dashboard] GET_MENSAJES_TUTOR:', {
+      hasData: !!mensajesData,
+      mensajeCount: mensajes.length,
+      firstMensaje: mensajes[0]
+    });
+  }, [mensajesData, mensajes.length]);
   
   // Helper para formatear fechas sin problemas de UTC
   const formatearFechaLocal = (date: Date) => {
@@ -3670,6 +3927,13 @@ function DashboardTab({
       return fechaMensaje >= fechaLimiteMensajes && fechaMensaje <= fechaBaseFin;
     });
     
+    console.log('📧 Mensajes Recientes:', mensajesRecientes.map(m => ({
+      id: m.id,
+      titulo: m.titulo,
+      destinatarioIds: m.destinatarioIds,
+      tieneDestinatarios: m.destinatarioIds && m.destinatarioIds.length > 0
+    })));
+    
     mensajesRecientes.forEach((mensaje: any) => {
       // Si el mensaje tiene destinatarioIds, crear un post por cada alumno destinatario
       if (mensaje.destinatarioIds && mensaje.destinatarioIds.length > 0) {
@@ -3688,6 +3952,7 @@ function DashboardTab({
         });
       } else {
         // Mensaje general (sin destinatarios específicos)
+        console.log('✅ Mensaje general detectado:', mensaje.titulo);
         posts.push({
           id: `mensaje-${mensaje.id}`,
           tipo: 'MENSAJE',
@@ -3794,6 +4059,81 @@ function DashboardTab({
       });
     }
     
+    // 🎨 POSTEOS DE EJEMPLO (ELIMINAR DESPUÉS)
+    const posTeosDeEjemplo = [
+      {
+        id: 'ejemplo-1',
+        tipo: 'MENSAJE',
+        fecha: new Date().toISOString(),
+        contenido: {
+          id: 'ej1',
+          titulo: '🎉 ¡Bienvenida Nueva Directora!',
+          contenido: 'Nos complace anunciar que la Directora María García se unirá a nuestro equipo. ¡Esperamos un excelente año juntas!',
+          autorNombre: 'Dirección',
+          publicadoEn: new Date().toISOString(),
+          creadoEn: new Date().toISOString(),
+          leido: false,
+          imagen: undefined
+        },
+        alumno: null,
+        prioridad: 3
+      },
+      {
+        id: 'ejemplo-2',
+        tipo: 'MENSAJE',
+        fecha: new Date(Date.now() - 86400000).toISOString(),
+        contenido: {
+          id: 'ej2',
+          titulo: '🏆 Ganadores Olimpíada Matemática',
+          contenido: 'Felicitamos a nuestros estudiantes por obtener el primer lugar en la competencia regional. ¡Orgullo del colegio!',
+          autorNombre: 'Rectorado',
+          publicadoEn: new Date(Date.now() - 86400000).toISOString(),
+          creadoEn: new Date(Date.now() - 86400000).toISOString(),
+          leido: true,
+          imagen: undefined
+        },
+        alumno: null,
+        prioridad: 3
+      },
+      {
+        id: 'ejemplo-3',
+        tipo: 'MENSAJE',
+        fecha: new Date(Date.now() - 172800000).toISOString(),
+        contenido: {
+          id: 'ej3',
+          titulo: '📚 Nueva Biblioteca Digital',
+          contenido: 'Ya disponible: acceso a miles de libros y recursos educativos. Ingresa con tu usuario del colegio.',
+          autorNombre: 'Biblioteca',
+          publicadoEn: new Date(Date.now() - 172800000).toISOString(),
+          creadoEn: new Date(Date.now() - 172800000).toISOString(),
+          leido: true,
+          imagen: undefined
+        },
+        alumno: null,
+        prioridad: 3
+      },
+      {
+        id: 'ejemplo-4',
+        tipo: 'MENSAJE',
+        fecha: new Date(Date.now() - 259200000).toISOString(),
+        contenido: {
+          id: 'ej4',
+          titulo: '⚽ Campeonato Inter-colegial',
+          contenido: 'Nos vemos el 15/11 en el estadio municipal. ¡Ven a apoyar a nuestros deportistas! Evento abierto a toda la comunidad.',
+          autorNombre: 'Deportes',
+          publicadoEn: new Date(Date.now() - 259200000).toISOString(),
+          creadoEn: new Date(Date.now() - 259200000).toISOString(),
+          leido: true,
+          imagen: undefined
+        },
+        alumno: null,
+        prioridad: 3
+      }
+    ];
+    
+    // DESCOMENTAR LA LÍNEA DE ABAJO PARA VER LOS POSTEOS DE EJEMPLO
+    postsFiltrados = [...posTeosDeEjemplo, ...postsFiltrados];
+    
     return postsFiltrados;
   }, [feedPosts, filtroTipo, selectedAlumnoId]);
   
@@ -3814,6 +4154,17 @@ function DashboardTab({
         }
         grupos[alumnoId].push(post);
       }
+    });
+    
+    console.log('📊 PostsPorAlumno Debug:', {
+      totalFeedPostsFiltrados: feedPostsFiltrados.length,
+      mensajesGenerales: mensajesGenerales.length,
+      grupos: Object.keys(grupos).length,
+      detallesMensajesGenerales: mensajesGenerales.map(m => ({ 
+        id: m.id, 
+        titulo: m.contenido.titulo,
+        alumno: m.alumno
+      }))
     });
     
     return { grupos, mensajesGenerales };
@@ -3937,6 +4288,11 @@ function DashboardTab({
           />
         }
       >
+        {/* 📸 CARRUSEL DE POSTEOS GENERALES */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+          <CarruselPosteos mensajesGenerales={postsPorAlumno.mensajesGenerales} />
+        </View>
+
         {/* Header de bienvenida con fecha */}
         <View style={{ padding: 16, paddingBottom: 8 }}>
           <Text category="h6" style={{ color: '#2E3A59', marginBottom: 4 }}>
@@ -3950,8 +4306,8 @@ function DashboardTab({
           </Text>
         </View>
 
-        {/* Cards por Alumno */}
-        <View style={{ paddingHorizontal: 16, gap: 16 }}>
+        {/* Cards por Alumno - COMPRIMIDO Y EXPANDIBLE */}
+        <View style={{ paddingHorizontal: 16, gap: 12 }}>
           {(() => {
             // Filtrar alumnos si hay un filtro activo
             const alumnosFiltrados = selectedAlumnoId 
@@ -4040,21 +4396,6 @@ function DashboardTab({
                 (filtroTipo.includes('EVALUACION') ? evaluacionesAlumno.length : 0) +
                 (filtroTipo.includes('SEGUIMIENTO') ? seguimientosAlumno.length : 0);
               
-              // Debug - Mostrar para todos los alumnos, no solo los que tienen novedades
-              console.log(`📊 Novedades para ${alumno.nombre} ${alumno.apellido}:`, {
-                mensajes: mensajesAlumno.length,
-                mensajesSinLeer: mensajesAlumno.filter((m: any) => !m.leido).length,
-                asistencias: asistenciasAlumno.length,
-                asistenciaHoy: asistenciaHoy ? `${asistenciaHoy.estado} (${asistenciaHoy.fecha})` : 'Sin registro',
-                asistenciasDetalle: asistenciasAlumno.map((a: any) => ({ 
-                  fecha: a.fecha, 
-                  estado: a.estado 
-                })),
-                evaluaciones: evaluacionesAlumno.length,
-                seguimientos: seguimientosAlumno.length,
-                total: totalNovedades
-              });
-              
               return {
                 ...alumno,
                 mensajes: mensajesAlumno,
@@ -4072,225 +4413,241 @@ function DashboardTab({
               return b.totalNovedades - a.totalNovedades;
             });
 
-            return alumnosOrdenados.map((alumno: any) => (
-              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
-                {/* Header del Alumno */}
-                <View style={{ 
-                  flexDirection: 'row', 
-                  alignItems: 'center', 
-                  gap: 12,
-                  marginBottom: 16
-                }}>
-                  <View style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 24,
-                    backgroundColor: alumno.totalNovedades > 0 ? '#00BFA5' : '#CBD5E0',
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}>
-                    <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' }}>
-                      {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text category="s1" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                      {alumno.nombre} {alumno.apellido}
-                    </Text>
-                    <Text appearance="hint" category="c1">
-                      {alumno.nivel} {alumno.division ? `· ${alumno.division}` : ''}
-                    </Text>
-                  </View>
-                  {alumno.totalNovedades > 0 && (
-                    <View style={{
-                      backgroundColor: '#00BFA5',
+            return alumnosOrdenados.map((alumno: any) => {
+              const isExpanded = expandedPosts[`alumno-${alumno.id}`];
+              const tieneNovedades = alumno.totalNovedades > 0;
+              
+              return (
+                <Card 
+                  key={alumno.id} 
+                  style={{ 
+                    marginBottom: 0, 
+                    borderRadius: 12, 
+                    backgroundColor: tieneNovedades ? '#FFFFFF' : '#F8FAFB',
+                    borderWidth: 1,
+                    borderColor: tieneNovedades ? '#E0E8F1' : '#E6EBF0',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {/* Header Comprimido - Siempre Visible */}
+                  <TouchableOpacity 
+                    onPress={() => setExpandedPosts(prev => ({ ...prev, [`alumno-${alumno.id}`]: !isExpanded }))}
+                    style={{ 
+                      flexDirection: 'row', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between',
                       paddingHorizontal: 12,
-                      paddingVertical: 6,
-                      borderRadius: 20
-                    }}>
-                      <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 }}>
-                        {alumno.totalNovedades}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Grid de Novedades */}
-                <View style={{ gap: 8 }}>
-                  {/* Mensajes */}
-                  {filtroTipo.includes('MENSAJE') && (
-                    <Card 
-                      style={{ 
-                        borderRadius: 12, 
-                        borderLeftWidth: 3, 
-                        borderLeftColor: '#3B82F6',
-                        backgroundColor: alumno.mensajes.length > 0 ? '#EFF6FF' : '#F9FAFB'
-                      }}
-                      onPress={() => {
-                        if (alumno.mensajes.length > 0) {
-                          setSelectedAlumnoId(alumno.id);
-                          setActiveTab('mensajes');
-                        }
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Icon name="email-outline" fill="#3B82F6" style={{ width: 20, height: 20 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                            Mensajes
-                          </Text>
-                        </View>
-                        <Text style={{ 
-                          color: alumno.mensajes.length > 0 ? '#3B82F6' : '#9CA3AF',
-                          fontWeight: 'bold',
-                          fontSize: 16
-                        }}>
-                          {alumno.mensajes.length > 0 ? alumno.mensajes.length : 'Sin novedades'}
+                      paddingVertical: 12,
+                      backgroundColor: tieneNovedades ? '#FFFFFF' : '#F8FAFB'
+                    }}
+                  >
+                    {/* Avatar + Info */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        backgroundColor: tieneNovedades ? '#00BFA5' : '#CBD5E0',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' }}>
+                          {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
                         </Text>
                       </View>
-                      {alumno.mensajes.length > 0 && (
-                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
-                          {alumno.mensajes.filter((m: any) => !m.leido).length} sin leer
+                      
+                      <View style={{ flex: 1 }}>
+                        <Text category="s2" style={{ color: '#2E3A59', fontWeight: '600' }}>
+                          {alumno.nombre} {alumno.apellido}
                         </Text>
+                        <Text appearance="hint" category="c2" style={{ fontSize: 11 }}>
+                          {alumno.nivel} {alumno.division ? `• ${alumno.division}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {/* Indicador de Novedades + Icono Expandir */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {tieneNovedades && (
+                        <View style={{
+                          backgroundColor: '#00BFA5',
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 12
+                        }}>
+                          <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 12 }}>
+                            {alumno.totalNovedades}
+                          </Text>
+                        </View>
                       )}
-                    </Card>
-                  )}
+                      
+                      <Icon 
+                        name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"} 
+                        fill={tieneNovedades ? '#00BFA5' : '#CBD5E0'} 
+                        style={{ width: 20, height: 20 }} 
+                      />
+                    </View>
+                  </TouchableOpacity>
 
-                  {/* Asistencias */}
-                  {filtroTipo.includes('ASISTENCIA') && (() => {
-                    // Buscar la asistencia de HOY para este alumno
-                    const hoyStr = formatearFechaLocal(new Date());
-                    const asistenciaHoy = alumno.asistencias.find((a: any) => a.fecha === hoyStr);
-                    
-                    // Determinar estado
-                    const tieneAsistenciaHoy = !!asistenciaHoy;
-                    const estaPresente = asistenciaHoy?.presente || false;
-                    
-                    return (
-                      <Card 
-                        style={{ 
-                          borderRadius: 12, 
-                          borderLeftWidth: 3, 
-                          borderLeftColor: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
-                          backgroundColor: tieneAsistenciaHoy 
-                            ? (estaPresente ? '#ECFDF5' : '#FEE2E2') 
-                            : '#F9FAFB'
-                        }}
-                        onPress={() => {
-                          setSelectedAlumnoId(alumno.id);
-                          setActiveTab('asistencias');
-                        }}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                          <Icon 
-                            name={tieneAsistenciaHoy ? (estaPresente ? "checkmark-circle-outline" : "close-circle-outline") : "alert-circle-outline"} 
-                            fill={tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF'} 
-                            style={{ width: 20, height: 20 }} 
-                          />
+                  {/* Contenido Expandible */}
+                  {isExpanded && (
+                    <View style={{ 
+                      borderTopWidth: 1, 
+                      borderTopColor: '#E6EBF0',
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
+                      gap: 8,
+                      backgroundColor: tieneNovedades ? '#FAFBFC' : '#F8FAFB'
+                    }}>
+                      {/* Mensajes */}
+                      {filtroTipo.includes('MENSAJE') && (
+                        <TouchableOpacity
+                          style={{ 
+                            flexDirection: 'row', 
+                            alignItems: 'center', 
+                            gap: 8,
+                            paddingHorizontal: 8,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            backgroundColor: alumno.mensajes.length > 0 ? '#EFF6FF' : '#F9FAFB'
+                          }}
+                          onPress={() => {
+                            if (alumno.mensajes.length > 0) {
+                              setSelectedAlumnoId(alumno.id);
+                              setActiveTab('mensajes');
+                            }
+                          }}
+                        >
+                          <Icon name="email-outline" fill="#3B82F6" style={{ width: 18, height: 18 }} />
                           <View style={{ flex: 1 }}>
-                            <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                              Asistencia Hoy
-                            </Text>
+                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Mensajes</Text>
                           </View>
                           <Text style={{ 
-                            color: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
+                            color: alumno.mensajes.length > 0 ? '#3B82F6' : '#9CA3AF',
                             fontWeight: 'bold',
-                            fontSize: 14
+                            fontSize: 13
                           }}>
-                            {tieneAsistenciaHoy 
-                              ? (estaPresente ? 'PRESENTE' : 'AUSENTE')
-                              : 'Sin registro'}
+                            {alumno.mensajes.length}
                           </Text>
-                        </View>
-                        {tieneAsistenciaHoy && asistenciaHoy.observaciones && (
-                          <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
-                            {asistenciaHoy.observaciones}
-                          </Text>
-                        )}
-                      </Card>
-                    );
-                  })()}
-
-                  {/* Evaluaciones */}
-                  {filtroTipo.includes('EVALUACION') && (
-                    <Card 
-                      style={{ 
-                        borderRadius: 12, 
-                        borderLeftWidth: 3, 
-                        borderLeftColor: '#F59E0B',
-                        backgroundColor: alumno.evaluaciones.length > 0 ? '#FFFBEB' : '#F9FAFB'
-                      }}
-                      onPress={() => {
-                        if (alumno.evaluaciones.length > 0) {
-                          setSelectedAlumnoId(alumno.id);
-                          setActiveTab('evaluaciones');
-                        }
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Icon name="star-outline" fill="#F59E0B" style={{ width: 20, height: 20 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                            Evaluaciones
-                          </Text>
-                        </View>
-                        <Text style={{ 
-                          color: alumno.evaluaciones.length > 0 ? '#F59E0B' : '#9CA3AF',
-                          fontWeight: 'bold',
-                          fontSize: 16
-                        }}>
-                          {alumno.evaluaciones.length > 0 ? alumno.evaluaciones.length : 'Sin novedades'}
-                        </Text>
-                      </View>
-                      {alumno.evaluaciones.length > 0 && (
-                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
-                          Últimas calificaciones
-                        </Text>
+                        </TouchableOpacity>
                       )}
-                    </Card>
-                  )}
 
-                  {/* Seguimientos */}
-                  {filtroTipo.includes('SEGUIMIENTO') && alumno.nivel === 'MATERNAL' && (
-                    <Card 
-                      style={{ 
-                        borderRadius: 12, 
-                        borderLeftWidth: 3, 
-                        borderLeftColor: '#8B5CF6',
-                        backgroundColor: alumno.seguimientos.length > 0 ? '#F5F3FF' : '#F9FAFB'
-                      }}
-                      onPress={() => {
-                        if (alumno.seguimientos.length > 0) {
-                          setSelectedAlumnoId(alumno.id);
-                          setActiveTab('seguimiento');
-                        }
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Icon name="heart-outline" fill="#8B5CF6" style={{ width: 20, height: 20 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text category="c1" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                            Seguimiento
+                      {/* Asistencias */}
+                      {filtroTipo.includes('ASISTENCIA') && (() => {
+                        const hoyStr = formatearFechaLocal(new Date());
+                        const asistenciaHoy = alumno.asistencias.find((a: any) => a.fecha === hoyStr);
+                        const tieneAsistenciaHoy = !!asistenciaHoy;
+                        const estaPresente = asistenciaHoy?.presente || false;
+                        
+                        return (
+                          <TouchableOpacity
+                            style={{ 
+                              flexDirection: 'row', 
+                              alignItems: 'center', 
+                              gap: 8,
+                              paddingHorizontal: 8,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              backgroundColor: tieneAsistenciaHoy 
+                                ? (estaPresente ? '#ECFDF5' : '#FEE2E2') 
+                                : '#F9FAFB'
+                            }}
+                            onPress={() => {
+                              setSelectedAlumnoId(alumno.id);
+                              setActiveTab('asistencias');
+                            }}
+                          >
+                            <Icon 
+                              name={tieneAsistenciaHoy ? (estaPresente ? "checkmark-circle-outline" : "close-circle-outline") : "alert-circle-outline"} 
+                              fill={tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF'} 
+                              style={{ width: 18, height: 18 }} 
+                            />
+                            <View style={{ flex: 1 }}>
+                              <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Asistencia</Text>
+                            </View>
+                            <Text style={{ 
+                              color: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
+                              fontWeight: 'bold',
+                              fontSize: 12
+                            }}>
+                              {tieneAsistenciaHoy 
+                                ? (estaPresente ? 'PRESENTE' : 'AUSENTE')
+                                : 'N/A'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })()}
+
+                      {/* Evaluaciones */}
+                      {filtroTipo.includes('EVALUACION') && (
+                        <TouchableOpacity
+                          style={{ 
+                            flexDirection: 'row', 
+                            alignItems: 'center', 
+                            gap: 8,
+                            paddingHorizontal: 8,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            backgroundColor: alumno.evaluaciones.length > 0 ? '#FFFBEB' : '#F9FAFB'
+                          }}
+                          onPress={() => {
+                            if (alumno.evaluaciones.length > 0) {
+                              setSelectedAlumnoId(alumno.id);
+                              setActiveTab('evaluaciones');
+                            }
+                          }}
+                        >
+                          <Icon name="star-outline" fill="#F59E0B" style={{ width: 18, height: 18 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Evaluaciones</Text>
+                          </View>
+                          <Text style={{ 
+                            color: alumno.evaluaciones.length > 0 ? '#F59E0B' : '#9CA3AF',
+                            fontWeight: 'bold',
+                            fontSize: 13
+                          }}>
+                            {alumno.evaluaciones.length}
                           </Text>
-                        </View>
-                        <Text style={{ 
-                          color: alumno.seguimientos.length > 0 ? '#8B5CF6' : '#9CA3AF',
-                          fontWeight: 'bold',
-                          fontSize: 16
-                        }}>
-                          {alumno.seguimientos.length > 0 ? alumno.seguimientos.length : 'Sin novedades'}
-                        </Text>
-                      </View>
-                      {alumno.seguimientos.length > 0 && (
-                        <Text appearance="hint" category="c2" style={{ marginTop: 4 }}>
-                          Actividades del día
-                        </Text>
+                        </TouchableOpacity>
                       )}
-                    </Card>
+
+                      {/* Seguimientos */}
+                      {filtroTipo.includes('SEGUIMIENTO') && alumno.nivel === 'MATERNAL' && (
+                        <TouchableOpacity
+                          style={{ 
+                            flexDirection: 'row', 
+                            alignItems: 'center', 
+                            gap: 8,
+                            paddingHorizontal: 8,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                            backgroundColor: alumno.seguimientos.length > 0 ? '#F5F3FF' : '#F9FAFB'
+                          }}
+                          onPress={() => {
+                            if (alumno.seguimientos.length > 0) {
+                              setSelectedAlumnoId(alumno.id);
+                              setActiveTab('seguimiento');
+                            }
+                          }}
+                        >
+                          <Icon name="heart-outline" fill="#8B5CF6" style={{ width: 18, height: 18 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Seguimiento</Text>
+                          </View>
+                          <Text style={{ 
+                            color: alumno.seguimientos.length > 0 ? '#8B5CF6' : '#9CA3AF',
+                            fontWeight: 'bold',
+                            fontSize: 13
+                          }}>
+                            {alumno.seguimientos.length}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   )}
-                </View>
-              </Card>
-            ));
+                </Card>
+              );
+            });
           })()}
         </View>
         

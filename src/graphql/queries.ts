@@ -6,7 +6,6 @@ export const LOGIN_TUTOR = gql`
       token
       user {
         id
-        usuario
         documento
         tipo
         nombre
@@ -25,12 +24,14 @@ export const GET_MENSAJES_TUTOR = gql`
       contenido
       tipo
       alcance
+      estado
       autorNombre
+      imagen
       publicadoEn
       creadoEn
       leido
-      destinatarioIds
       leidoPorTutorIds
+      destinatarioIds
     }
   }
 `;
@@ -203,6 +204,7 @@ export const GET_MENSAJES = gql`
       tipo
       alcance
       autorNombre
+      imagen
       publicadoEn
       creadoEn
       leido
