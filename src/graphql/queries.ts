@@ -31,6 +31,7 @@ export const GET_MENSAJES_TUTOR = gql`
       leido
       leidoPorTutorIds
       destinatarioIds
+      imagen
     }
   }
 `;

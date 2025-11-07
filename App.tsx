@@ -938,6 +938,14 @@ function MensajesTab({
                         </Text>
                       </View>
                     )}
+                    {mensaje.imagen && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Icon name="image-outline" style={{ width: 12, height: 12, marginRight: 4 }} fill="#00BFA5" />
+                        <Text category="c2" style={{ color: '#00BFA5', fontWeight: '600', fontSize: 10 }}>
+                          CON IMAGEN
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
                 <View style={{ 
@@ -951,6 +959,22 @@ function MensajesTab({
                   </Text>
                 </View>
               </View>
+              {/* Miniatura de imagen si existe */}
+              {mensaje.imagen && (
+                <View style={{ marginBottom: 12, borderRadius: 8, overflow: 'hidden' }}>
+                  <Image
+                    source={{ uri: mensaje.imagen }}
+                    style={{
+                      width: '100%',
+                      height: 120,
+                      backgroundColor: '#E6EBF0',
+                    }}
+                    onError={(error) => {
+                      console.warn('🖼️❌ Error loading preview image for mensaje:', mensaje.id);
+                    }}
+                  />
+                </View>
+              )}
               <Text numberOfLines={2} appearance="hint" category="p2" style={{ lineHeight: 20 }}>
                 {mensaje.contenido || 'Sin contenido'}
               </Text>
