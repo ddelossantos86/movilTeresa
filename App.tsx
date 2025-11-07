@@ -3622,9 +3622,9 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
               }}
             >
               {/* Imagen */}
-              {post.contenido.imagen ? (
+              {post.imagen || post.contenido?.imagen ? (
                 <Image
-                  source={{ uri: post.contenido.imagen }}
+                  source={{ uri: post.imagen || post.contenido?.imagen }}
                   style={{
                     width: '100%',
                     height: 200,
@@ -3633,11 +3633,11 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
                   onError={(error) => {
                     console.warn('🖼️❌ Error loading image for post:', post.id);
                     console.warn('   Error:', error.nativeEvent.error);
-                    console.warn('   URI:', post.contenido.imagen?.substring(0, 100));
+                    console.warn('   URI:', (post.imagen || post.contenido?.imagen)?.substring(0, 100));
                   }}
                   onLoad={() => {
                     console.log('🖼️✅ Image loaded successfully for post:', post.id);
-                    console.log('   Size: ' + (post.contenido.imagen?.length || 0) / 1024 + ' KB');
+                    console.log('   Size: ' + ((post.imagen || post.contenido?.imagen)?.length || 0) / 1024 + ' KB');
                   }}
                 />
               ) : (
