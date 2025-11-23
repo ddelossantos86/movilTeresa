@@ -1,24 +1,27 @@
-import { ApolloClient, InMemoryCache, createHttpLink } from '@apollo/client';
+import { ApolloClient, InMemoryCache, createHttpLink, ApolloLink } from '@apollo/client';
 import { setContext } from '@apollo/client/link/context';
 import { onError } from '@apollo/client/link/error';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Observable } from '@apollo/client';
 
-// Configuración de URL de API según entorno
-// DESARROLLO: IP local (cambiar según tu red)
-// PRODUCCIÓN: IP del servidor DonWeb
+// ========================================
+// CONFIGURACIÓN DINÁMICA DE API
+// ========================================
+// NOTA: Cambiar según el entorno
+// - Desarrollo local: localhost
+// - Cloud/Producción: actualizar según deploy
+// ========================================
+const API_HOST = '192.168.68.103'; // ← IP local actual
+const API_PORT = 3000;
+const API_PROTOCOL = 'http';
 
-const IS_PRODUCTION = false; // ✅ CAMBIAR A false PARA LOCAL
-const LOCAL_IP = '10.1.142.88';
-const PRODUCTION_IP = '149.50.150.151';
+// En Android, si usas 10.0.2.2, descomenta:
+// const API_HOST = '10.0.2.2';
 
-// Usar IP de producción o desarrollo según configuración
-const API_URL = IS_PRODUCTION 
-  ? `http://${PRODUCTION_IP}:3090/graphql`
-  : `http://${LOCAL_IP}:3000/graphql`;
+const API_URL = `${API_PROTOCOL}://${API_HOST}:${API_PORT}/graphql`;
 
-console.log('🌐 Entorno:', IS_PRODUCTION ? 'PRODUCCIÓN' : 'DESARROLLO');
+console.log('🌐 Entorno: DESARROLLO');
 console.log('🌐 API_URL configurada:', API_URL);
 console.log('📱 Platform:', Platform.OS);
 
@@ -177,12 +180,12 @@ const authLink = setContext(async (operation, { headers }) => {
   const token = await AsyncStorage.getItem('authToken');
   
   if (!token) {
-    console.warn('⚠️  No hay token de autenticación disponible');
+    console.log('🔑 [AuthLink] Sin token para:', operation.operationName);
   } else {
-    console.log('🔑 Token disponible:', token.substring(0, 20) + '...');
+    console.log('🔑 [AuthLink] Token presente para:', operation.operationName);
   }
   
-  console.log(`📤 Enviando operación: ${operation.operationName}`);
+  console.log(`📤 [AuthLink] Operación: ${operation.operationName} - Token: ${token ? 'SÍ' : 'NO'}`);
   
   return {
     headers: {
@@ -193,9 +196,57 @@ const authLink = setContext(async (operation, { headers }) => {
   };
 });
 
+// Link para sanitizar undefined en respuestas (CRÍTICO PARA APOLLO)
+// Este link intercepta las respuestas DESPUÉS de recibirlas del servidor
+const sanitizeLink = new ApolloLink((operation, forward) => {
+  return forward(operation).map((response) => {
+    // Función recursiva para eliminar undefined
+    const sanitize = (obj: any): any => {
+      if (obj === null || obj === undefined) {
+        return null;
+      }
+      
+      if (Array.isArray(obj)) {
+        return obj.map(item => sanitize(item));
+      }
+      
+      if (typeof obj === 'object' && !(obj instanceof Date)) {
+        const sanitized: any = {};
+        for (const key in obj) {
+          if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const value = obj[key];
+            sanitized[key] = value === undefined ? null : sanitize(value);
+          }
+        }
+        return sanitized;
+      }
+      
+      return obj;
+    };
+
+    // Sanitizar la data de la respuesta
+    if (response.data) {
+      const original = JSON.stringify(response.data);
+      response.data = sanitize(response.data);
+      const sanitized = JSON.stringify(response.data);
+      
+      if (original !== sanitized) {
+        console.log('🧹 [SanitizeLink] Undefined encontrado y convertido a null en:', operation.operationName);
+      }
+    }
+
+    return response;
+  });
+});
+
 // Cliente Apollo
 export const apolloClient = new ApolloClient({
-  link: errorLink.concat(authLink.concat(httpLink)),
+  link: ApolloLink.from([
+    errorLink,
+    authLink,
+    sanitizeLink,
+    httpLink
+  ]),
   cache: new InMemoryCache({
     typePolicies: {},
     resultCacheMaxSize: 10000000,

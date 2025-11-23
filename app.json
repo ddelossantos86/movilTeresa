@@ -1,26 +1,30 @@
 {
   "expo": {
-    "name": "movilTeresa",
-    "slug": "movilTeresa",
+    "name": "Dhora",
+    "slug": "movilDhora",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "resizeMode": "cover",
+      "backgroundColor": "#764BA2"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.teresacolegio.movil"
+      "bundleIdentifier": "com.dhora.movil",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu galería de fotos para guardar las imágenes descargadas de los mensajes.",
+        "NSPhotoLibraryAddUsageDescription": "Necesitamos permiso para guardar imágenes en tu galería de fotos.",
+        "NSCameraUsageDescription": "Cámara"
+      }
     },
     "android": {
-      "package": "com.teresacolegio.movil",
+      "package": "com.dhora.movil",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#764BA2"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -28,7 +32,10 @@
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
       ],
       "networkSecurityConfig": "./network-security-config.xml"
     },
@@ -36,7 +43,7 @@
       "icon": "./assets/notification-icon.png",
       "color": "#00BFA5",
       "androidMode": "default",
-      "androidCollapsedTitle": "Teresa Colegio"
+      "androidCollapsedTitle": "Dhora"
     },
     "web": {
       "favicon": "./assets/favicon.png"

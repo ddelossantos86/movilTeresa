@@ -15,20 +15,58 @@ export default function AsistenciasScreen() {
   const [selectedAlumno, setSelectedAlumno] = useState<string | null>(null);
 
   const { data: alumnosData, loading: alumnosLoading } = useQuery(GET_ALUMNOS_TUTOR);
-  const { data: asistenciasData, loading: asistenciasLoading } = useQuery(GET_ASISTENCIAS, {
+  const { data: asistenciasData, loading: asistenciasLoading, error: asistenciasError } = useQuery(GET_ASISTENCIAS, {
     variables: { alumnoId: selectedAlumno },
     skip: !selectedAlumno,
   });
 
+  React.useEffect(() => {
+    console.log('🎯 AsistenciasScreen - selectedAlumno cambió:', selectedAlumno);
+  }, [selectedAlumno]);
+
+  React.useEffect(() => {
+    console.log('🎯 AsistenciasScreen - Query data cambió');
+    console.log('   asistenciasLoading:', asistenciasLoading);
+    console.log('   asistenciasError:', asistenciasError?.message);
+    console.log('   asistenciasData:', asistenciasData);
+  }, [asistenciasLoading, asistenciasData, asistenciasError]);
+
   const alumnos = alumnosData?.alumnosTutor || [];
-  const asistencias = asistenciasData?.asistenciasByAlumno || [];
+  
+  // Transformar asistencias: aplanar registros y mapear estado a presente/ausente
+  const asistencias = React.useMemo(() => {
+    const rawAsistencias = asistenciasData?.asistenciasTutor || [];
+    console.log('📊 AsistenciasScreen - Datos crudos:', rawAsistencias.length);
+    
+    const result = rawAsistencias.flatMap((asistencia: any) => {
+      const fecha = asistencia.fecha;
+      return (asistencia.registros || []).map((registro: any) => {
+        const esPresente = registro.estado === 'PRESENTE';
+        console.log(`  - Registro: ${registro.alumnoId}, Estado: ${registro.estado}, Presente: ${esPresente}`);
+        return {
+          id: `${asistencia.id}-${registro.alumnoId}`,
+          fecha,
+          presente: esPresente,
+          estado: registro.estado,
+          observaciones: registro.observaciones,
+          alumnoId: registro.alumnoId,
+        };
+      });
+    });
+    
+    console.log('📊 AsistenciasScreen - Transformadas:', result.length);
+    return result;
+  }, [asistenciasData]);
 
   const renderAlumno = ({ item }: any) => {
     const isSelected = selectedAlumno === item.id;
     return (
       <TouchableOpacity
         style={[styles.alumnoItem, isSelected && styles.alumnoItemSelected]}
-        onPress={() => setSelectedAlumno(item.id)}
+        onPress={() => {
+          console.log('👆 Alumno seleccionado:', item.id, item.nombre);
+          setSelectedAlumno(item.id);
+        }}
       >
         <View style={styles.alumnoInfo}>
           <Ionicons 
@@ -131,6 +169,12 @@ export default function AsistenciasScreen() {
         asistenciasLoading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#2563eb" />
+            <Text style={styles.loadingText}>Cargando asistencias…</Text>
+          </View>
+        ) : asistenciasError ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="alert-circle-outline" size={64} color="#ef4444" />
+            <Text style={styles.emptyText}>Error: {asistenciasError.message}</Text>
           </View>
         ) : asistencias.length > 0 ? (
           <FlatList

@@ -53,7 +53,7 @@ export default function PushNotifications({ mensajes }: Props) {
     try {
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
-          name: 'Mensajes Teresa',
+          name: 'Mensajes Dhora',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#2563eb',

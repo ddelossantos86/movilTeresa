@@ -53,7 +53,7 @@ export default function LoginScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Teresa Informa</Text>
+        <Text style={styles.title}>Dhora</Text>
         <Text style={styles.subtitle}>Portal de Familias</Text>
       </View>
 

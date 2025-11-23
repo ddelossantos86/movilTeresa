@@ -32,6 +32,7 @@ export const GET_MENSAJES_TUTOR = gql`
       leidoPorTutorIds
       destinatarioIds
       imagen
+      imagenes
     }
   }
 `;
@@ -86,6 +87,8 @@ export const GET_ASISTENCIAS = gql`
     asistenciasTutor(alumnoId: $alumnoId, desde: $desde, hasta: $hasta) {
       id
       fecha
+      divisionNombre
+      gradoNombre
       registros {
         alumnoId
         estado
@@ -152,8 +155,8 @@ export const GET_OBSERVACIONES_INICIAL = gql`
 `;
 
 export const GET_SEGUIMIENTO_DIARIO = gql`
-  query GetSeguimientoDiario($alumnoId: ID!, $fechaInicio: DateTime!, $fechaFin: DateTime!) {
-    seguimientosDiariosPorAlumno(alumnoId: $alumnoId, fechaInicio: $fechaInicio, fechaFin: $fechaFin) {
+  query GetSeguimientoDiario($alumnoId: ID!, $fechaInicio: DateTime, $fechaFin: DateTime, $limit: Float) {
+    seguimientosDiariosPorAlumnoTutor(alumnoId: $alumnoId, fechaInicio: $fechaInicio, fechaFin: $fechaFin, limit: $limit) {
       id
       alumnoId
       divisionId
@@ -251,3 +254,47 @@ export const UPDATE_PUSH_TOKEN = gql`
     }
   }
 `;
+
+export const TOGGLE_MENSAJE_REACCION = gql`
+  mutation ToggleMensajeReaccion($mensajeId: ID!, $tipo: String!) {
+    toggleMensajeReaccion(mensajeId: $mensajeId, tipo: $tipo) {
+      id
+      mensajeId
+      tutorId
+      tipo
+      creadoEn
+    }
+  }
+`;
+
+// DISABLED: This query field 'reaccionesMensaje' doesn't exist in the backend
+// It was causing constant 400 errors on every Dashboard load
+/*
+export const GET_REACCIONES_MENSAJE = gql`
+  query GetReaccionesMensaje($mensajeId: ID!) {
+    reaccionesMensaje(mensajeId: $mensajeId) {
+      id
+      mensajeId
+      tutorId
+      tutorNombre
+      tipo
+      creadoEn
+    }
+  }
+`;
+*/
+
+// DEPRECATED: Este resolver no existe en el backend
+// export const GET_CONTADOR_REACCIONES = gql`
+//   query GetContadorReacciones($mensajeId: ID!) {
+//     contadorReacciones(mensajeId: $mensajeId) {
+//       mensajeId
+//       totalReacciones
+//       reaccionesPorTipo {
+//         tipo
+//         cantidad
+//       }
+//       miReaccion
+//     }
+//   }
+// `;

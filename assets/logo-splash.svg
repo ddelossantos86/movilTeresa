@@ -1,0 +1,12 @@
+<svg width="220" height="120" viewBox="0 0 220 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="logoTitle">
+  <title id="logoTitle">Nuevo logo Colegios</title>
+  <rect width="220" height="120" rx="24" fill="#111827"/>
+  <g fill="#F3F4F6">
+    <path d="M62 30h18c21 0 34 14 34 30s-13 30-34 30H62V30zm18 44c10 0 16-5 16-14s-6-14-16-14h-6v28h6z"/>
+    <path d="M133 30h18v60h-18z"/>
+    <path d="M165 30h18v60h-18z"/>
+  </g>
+  <text x="110" y="106" font-family="Inter, 'Helvetica Neue', sans-serif" font-size="14" letter-spacing="6" text-anchor="middle" fill="#9CA3AF">
+    COLEGIOS
+  </text>
+</svg>

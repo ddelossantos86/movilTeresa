@@ -12,6 +12,8 @@ import { useQuery } from '@apollo/client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GET_MENSAJES } from '../graphql/queries';
 import * as Notifications from 'expo-notifications';
+import AsistenciasScreen from './AsistenciasScreen';
+import { Ionicons } from '@expo/vector-icons';
 
 // Configurar cómo se muestran las notificaciones cuando la app está en primer plano
 Notifications.setNotificationHandler({
@@ -26,6 +28,7 @@ Notifications.setNotificationHandler({
 
 export default function HomeScreen({ navigation }: any) {
   const [tutorData, setTutorData] = useState<any>(null);
+  const [showAsistencias, setShowAsistencias] = useState(false);
   
   const { data, loading, refetch } = useQuery(GET_MENSAJES);
 
@@ -102,38 +105,90 @@ export default function HomeScreen({ navigation }: any) {
     return labels[tipo] || tipo;
   };
 
+  const getAlcanceLabel = (alcance: string) => {
+    const labels: any = {
+      COLEGIO: 'Todos',
+      GRADO: 'Curso',
+      DIVISION: 'División',
+      ALUMNO: 'Personal',
+    };
+    return labels[alcance] || alcance;
+  };
+
   const renderMensaje = ({ item }: any) => (
     <TouchableOpacity style={styles.mensajeCard}>
       <View style={styles.mensajeHeader}>
         <Text style={styles.emoji}>{getTipoEmoji(item.tipo)}</Text>
         <View style={styles.mensajeInfo}>
           <Text style={styles.mensajeTitulo}>{item.titulo}</Text>
-          <Text style={styles.mensajeTipo}>{getTipoLabel(item.tipo)}</Text>
+          <View style={styles.tipoAndAlcanceContainer}>
+            <Text style={styles.mensajeTipo}>{getTipoLabel(item.tipo)}</Text>
+            {item.alcance && (
+              <Text style={styles.alcanceLabel}>{getAlcanceLabel(item.alcance)}</Text>
+            )}
+          </View>
         </View>
       </View>
       <Text style={styles.mensajeContenido} numberOfLines={3}>
         {item.contenido}
       </Text>
-      {item.fechaPublicacion && (
+      {item.publicadoEn && (
         <Text style={styles.mensajeFecha}>
-          {new Date(item.fechaPublicacion).toLocaleDateString('es-AR')}
+          {new Date(item.publicadoEn).toLocaleDateString('es-AR')}
         </Text>
       )}
     </TouchableOpacity>
   );
 
+  // Si estamos en la pantalla de asistencias, mostrarla
+  if (showAsistencias) {
+    return (
+      <View style={{ flex: 1 }}>
+        <View style={{ 
+          backgroundColor: '#764BA2', 
+          paddingTop: 12, 
+          paddingHorizontal: 16, 
+          paddingBottom: 12,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
+            Seguimiento de Asistencias
+          </Text>
+          <TouchableOpacity 
+            onPress={() => setShowAsistencias(false)}
+            style={{ padding: 8 }}
+          >
+            <Ionicons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <AsistenciasScreen />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Teresa Informa</Text>
+          <Text style={styles.headerTitle}>Dhora</Text>
           <Text style={styles.headerSubtitle}>
             Hola, {tutorData?.nombre || 'Tutor'}
           </Text>
         </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Salir</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity 
+            onPress={() => setShowAsistencias(true)}
+            style={[styles.logoutButton, { backgroundColor: '#10b981' }]}
+          >
+            <Ionicons name="calendar" size={16} color="#fff" />
+            <Text style={[styles.logoutText, { marginLeft: 4 }]}>Seguimiento</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <Text style={styles.logoutText}>Salir</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -218,6 +273,19 @@ const styles = StyleSheet.create({
   mensajeTipo: {
     fontSize: 12,
     color: '#2563eb',
+  },
+  tipoAndAlcanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  alcanceLabel: {
+    fontSize: 12,
+    color: '#F093FB',
+    backgroundColor: '#FEE6F8',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   mensajeContenido: {
     fontSize: 14,

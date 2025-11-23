@@ -22,9 +22,9 @@ export default function TeresaLogo({ size = 100 }: TeresaLogoProps) {
       
       {/* Elementos decorativos Memphis flotantes */}
       <Circle cx="50" cy="40" r="12" fill="#F093FB" opacity="0.4" />
-      <Rect x="90" y="25" width="20" height="20" fill="#667EEA" opacity="0.3" transform="rotate(25 100 35)" />
-      <Circle cx="350" cy="130" r="15" fill="#764BA2" opacity="0.3" />
-      <Polygon points="370,40 380,55 360,55" fill="#2E3A59" opacity="0.4" />
+      <Rect x="90" y="25" width="20" height="20" fill="#764BA2" opacity="0.3" transform="rotate(25 100 35)" />
+      <Circle cx="350" cy="130" r="15" fill="#667EEA" opacity="0.3" />
+      <Polygon points="370,40 380,55 360,55" fill="#764BA2" opacity="0.4" />
       
       {/* Círculo principal más grande con capas */}
       <Circle cx="75" cy="80" r="50" fill="url(#mainGrad)" opacity="0.2" />
@@ -39,9 +39,9 @@ export default function TeresaLogo({ size = 100 }: TeresaLogoProps) {
       
       {/* Pequeñas formas cerca del círculo */}
       <Rect x="25" y="95" width="12" height="12" fill="url(#accentGrad)" transform="rotate(-20 31 101)" />
-      <Circle cx="115" cy="60" r="6" fill="#F093FB" />
+      <Circle cx="115" cy="60" r="6" fill="#00E096" />
       
-      {/* Texto TERESA con estilo bold */}
+      {/* Texto DHORA con estilo bold */}
       <SvgText
         x="145"
         y="90"
@@ -51,7 +51,7 @@ export default function TeresaLogo({ size = 100 }: TeresaLogoProps) {
         letterSpacing="-2"
         fontFamily="system-ui, -apple-system, BlinkMacSystemFont"
       >
-        TERESA
+        DHORA
       </SvgText>
       
       {/* Líneas decorativas múltiples */}
@@ -59,8 +59,8 @@ export default function TeresaLogo({ size = 100 }: TeresaLogoProps) {
       <Rect x="240" y="100" width="60" height="4" rx="2" fill="url(#accentGrad)" />
       
       {/* Detalles finales */}
-      <Circle cx="310" cy="75" r="8" fill="#764BA2" opacity="0.5" />
-      <Rect x="330" y="95" width="18" height="18" fill="#667EEA" opacity="0.4" transform="rotate(45 339 104)" />
+      <Circle cx="310" cy="155" r="8" fill="#764BA2" opacity="0.5" />
+      <Rect x="330" y="45" width="15" height="15" fill="#F093FB" opacity="0.4" transform="rotate(15 337 52)" />
     </Svg>
   );
 }

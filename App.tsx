@@ -1,23 +1,32 @@
+import { BlurView } from 'expo-blur';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, SafeAreaView, ScrollView, RefreshControl, StatusBar, Modal, TouchableOpacity, Animated, Easing, Platform, LogBox, Alert, Image } from 'react-native';
+import { View, SafeAreaView, ScrollView, RefreshControl, StatusBar, Modal, TouchableOpacity, Animated, Easing, Platform, LogBox, Alert, Image, Dimensions, FlatList } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ApplicationProvider, Layout, Text, Input, Button, Card, Spinner, Divider, Icon, TopNavigation, TopNavigationAction, IconRegistry, Datepicker, Select, SelectItem, IndexPath } from '@ui-kitten/components';
 import { EvaIconsPack } from '@ui-kitten/eva-icons';
 import * as eva from '@eva-design/eva';
 import { ApolloProvider, useMutation, useQuery, gql } from '@apollo/client';
 import { apolloClient } from './src/config/apollo';
+import ImageViewing from 'react-native-image-viewing';
 import { LOGIN_TUTOR, GET_MENSAJES_TUTOR, MARCAR_MENSAJE_LEIDO, GET_ALUMNOS_TUTOR, GET_ASISTENCIAS, GET_CALIFICACIONES, GET_OBSERVACIONES_INICIAL, GET_SEGUIMIENTO_DIARIO, UPDATE_TUTOR_PROFILE, UPDATE_ALUMNO_CONDICIONES, GET_TUTOR_INFO, UPDATE_PUSH_TOKEN } from './src/graphql/queries';
 import { useApolloCache } from './src/hooks/useApolloCache';
+// DISABLED: Hook depends on broken GET_REACCIONES_MENSAJE query
+// import { useMensajeReaccion } from './src/hooks/useMensajeReaccion';
+import { PostCard } from './src/components/PostCard';
+import { MensajeDetailCarousel } from './src/components/MensajeDetailCarousel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
-import TeresaLogo from './assets/TeresaLogo';
+import TeresaLogo from './assets/DhoraLogo';
 import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
-import TeresaLogoIcon from './assets/TeresaLogoIcon';
-import { BlurView } from '@react-native-community/blur';
+import DHIcon from './assets/DHIcon';
+import DHIconV2 from './assets/DHIconV2';
+import DHLogo from './assets/DHLogo';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as MediaLibrary from 'expo-media-library';
 
 // Suprimir warnings conocidos de UI Kitten y React Native
 LogBox.ignoreLogs([
@@ -39,7 +48,9 @@ console.warn = (...args) => {
      args[0].includes('Cannot connect to Metro') ||
      args[0].includes('cache.diff') ||
      args[0].includes('canonizeResults') ||
-     args[0].includes('Apollo'))
+     args[0].includes('Apollo') ||
+     args[0].includes('Error cargando reacciones') ||
+     args[0].includes('reacciones (ignorado)'))
   ) {
     return;
   }
@@ -59,16 +70,16 @@ Notifications.setNotificationHandler({
 // 🎨 TEMA CLARO VIBRANTE - Colores alegres y modernos
 const customTheme = {
   ...eva.light,
-  // Turquesa vibrante como color principal
-  'color-primary-100': '#C2F5EC',
-  'color-primary-200': '#8AEBDA',
-  'color-primary-300': '#52E0C8',
-  'color-primary-400': '#1AD6B6',
-  'color-primary-500': '#00BFA5', // Turquesa principal
-  'color-primary-600': '#00A58D',
-  'color-primary-700': '#008B75',
-  'color-primary-800': '#00715D',
-  'color-primary-900': '#005745',
+  // PRIMARY - PÚRPURA (Headers, botones principales, elementos clave)
+  'color-primary-100': '#F5E6FB',
+  'color-primary-200': '#E8C8F8',
+  'color-primary-300': '#D4B5E0',
+  'color-primary-400': '#C293D8',
+  'color-primary-500': '#B084CC',
+  'color-primary-600': '#9D7FDB',
+  'color-primary-700': '#764BA2', // Púrpura del logo (DOMINANTE PRINCIPAL)
+  'color-primary-800': '#6A4293',
+  'color-primary-900': '#5C3A7F',
   
   // Fondos súper claros y limpios
   'color-basic-100': '#FFFFFF',
@@ -77,26 +88,135 @@ const customTheme = {
   'color-basic-400': '#E6EBF0',
   'color-basic-500': '#C5CEE0',
   'color-basic-600': '#8F9BB3',
+
+  // DUAL STRATEGY: Púrpura + Rosa estratégicamente distribuidos
+  // SUCCESS = Rosa (confirmaciones, accents, elementos secundarios vibrantes)
+  'color-success-100': '#FEE6F8',
+  'color-success-500': '#F093FB', // Rosa del logo (ACCENT VIBRANTE)
+  'color-success-700': '#E670F0',
   
-  // Colores de acento vibrantes
-  'color-success-100': '#D4F8E8',
-  'color-success-500': '#00E096', // Verde brillante
-  'color-success-700': '#00B377',
+  // WARNING = Rosa-púrpura mix (para diferenciar de danger)
+  'color-warning-100': '#EFE0F0',
+  'color-warning-500': '#D8A3D8', // Rosa-púrpura mix (advertencias)
+  'color-warning-700': '#C291C2',
   
-  'color-warning-100': '#FFF3D6',
-  'color-warning-500': '#FFB020', // Naranja cálido
-  'color-warning-700': '#E69500',
+  // DANGER = Púrpura oscuro (errores graves)
+  'color-danger-100': '#E8DFF5',
+  'color-danger-500': '#A6708B', // Púrpura apagado (errores)
+  'color-danger-700': '#8B5A7A',
   
-  'color-danger-100': '#FFECEC',
-  'color-danger-500': '#FF3D71', // Rojo coral
-  'color-danger-700': '#DB2C5E',
-  
-  'color-info-100': '#D6EDFF',
-  'color-info-500': '#0095FF', // Azul cielo brillante
-  'color-info-700': '#006FD6',
+  // INFO = Púrpura claro (información)
+  'color-info-100': '#E8DFF5',
+  'color-info-500': '#9D7FDB', // Púrpura claro (info)
+  'color-info-700': '#764BA2',
 };
 
-// 🔐 LOGIN
+// 🌙 TEMA OSCURO - Colores oscuros con púrpura-rosa
+const darkTheme = {
+  ...eva.dark,
+  
+  // === BACKGROUNDS (Jerarquía de profundidad) ===
+  'color-basic-100': '#0F0F1E', // App background (más oscuro)
+  'color-basic-200': '#1A1A2E', // Primary background
+  'color-basic-300': '#222841', // Cards, sections
+  'color-basic-400': '#2A3154', // Overlay, elevated
+  'color-basic-500': '#323C67', // Inputs, fields
+  'color-basic-600': '#3A3F5F', // Borders, dividers
+  'color-basic-700': '#4A4F6F', // Borders light
+
+  // === PRIMARY - PÚRPURA (Headers, botones principales) ===
+  'color-primary-100': '#5C3A7F',
+  'color-primary-200': '#6A4293',
+  'color-primary-300': '#764BA2', // Púrpura del logo
+  'color-primary-400': '#8B5AA3',
+  'color-primary-500': '#9D7FDB',
+  'color-primary-600': '#B8A3FF',
+  'color-primary-700': '#764BA2', // Púrpura del logo
+  'color-primary-800': '#CDB5FF',
+  'color-primary-900': '#E8D7FF',
+
+  // === SUCCESS - ROSA (Acentos, badges) ===
+  'color-success-100': '#4D2B4D',
+  'color-success-200': '#7A4D8A',
+  'color-success-500': '#F093FB', // Rosa vibrante en oscuro
+  'color-success-700': '#FF6FFF',
+  'color-success-800': '#FF85FF',
+
+  // === WARNING ===
+  'color-warning-100': '#5C3A4D',
+  'color-warning-500': '#D8A3D8',
+  'color-warning-700': '#E8B3E8',
+
+  // === DANGER ===
+  'color-danger-100': '#4D2B3D',
+  'color-danger-500': '#C291C2',
+  'color-danger-700': '#D8A3D8',
+
+  // === INFO ===
+  'color-info-100': '#3D2B5C',
+  'color-info-500': '#B8A3FF',
+  'color-info-700': '#D4C8FF',
+};
+
+// 🎨 CONSTANTES DE COLORES PARA MODO OSCURO (Usado en todos los componentes)
+const DARK_COLORS = {
+  // Backgrounds - Jerarquía
+  bg_app: '#0F0F1E',
+  bg_primary: '#1A1A2E',
+  bg_secondary: '#222841',
+  bg_tertiary: '#2A3154',
+  bg_input: '#323C67',
+  
+  // Text - Legibilidad
+  text_primary: '#FFFFFF',
+  text_secondary: '#D0D0D0',
+  text_tertiary: '#A0A0B0',
+  text_disabled: '#808090',
+  text_hint: '#606070',
+  
+  // Borders - Separación
+  border_subtle: '#3A3F5F',
+  border_medium: '#404560',
+  border_light: '#4A4F6F',
+  
+  // Accents - Énfasis
+  accent_primary: '#764BA2',
+  accent_rose: '#F093FB',
+  accent_purple: '#9D7FDB',
+  accent_purple_light: '#B8A3FF',
+};
+
+// 🎨 CONSTANTES DE COLORES PARA MODO CLARO (Usado en todos los componentes)
+const LIGHT_COLORS = {
+  // Backgrounds
+  bg_app: '#FFFFFF',
+  bg_primary: '#F8FAFB',
+  bg_secondary: '#EFF3F6',
+  bg_tertiary: '#E8EEF3',
+  bg_input: '#FFFFFF',
+  
+  // Text
+  text_primary: '#1A1F36',
+  text_secondary: '#666666',
+  text_tertiary: '#999999',
+  text_disabled: '#CCCCCC',
+  text_hint: '#999999',
+  
+  // Borders
+  border_subtle: '#e5e7eb',
+  border_medium: '#d0d5dd',
+  border_light: '#c9cdd4',
+  
+  // Accents
+  accent_primary: '#764BA2',
+  accent_rose: '#F093FB',
+  accent_purple: '#9D7FDB',
+  accent_purple_light: '#B8A3FF',
+};
+
+// Función para obtener colores según modo oscuro
+const getColors = (isDarkMode: boolean) => isDarkMode ? DARK_COLORS : LIGHT_COLORS;
+
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [documento, setDocumento] = useState('');
   const [password, setPassword] = useState('');
@@ -218,73 +338,77 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24 }}
           showsVerticalScrollIndicator={false}
         >
-          <View style={{ alignItems: 'center', marginBottom: 40 }}>
-            {/* Logo SVG de TERESA */}
-            <TeresaLogo size={140} />
-         
+          {/* Logo DH - Texto DHORA en violeta */}
+          <View style={{ alignItems: 'center', marginBottom: 48 }}>
+            <Text style={{
+              fontSize: 48,
+              fontWeight: '300',
+              color: '#764BA2',
+              letterSpacing: 16,
+              fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+              textTransform: 'uppercase',
+            }}>
+              DHORA
+            </Text>
+            <Text style={{
+              marginTop: 8,
+              fontSize: 12,
+              fontWeight: '300',
+              color: '#764BA2',
+              letterSpacing: 2,
+              fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+              opacity: 0.8
+            }}>
+              Conexión Familiar
+            </Text>
           </View>
 
-          <Card disabled style={{ 
-            marginBottom: 24, 
-            borderRadius: 20, 
-            backgroundColor: '#F8FAFB',
-            borderWidth: 1,
-            borderColor: '#E6EBF0'
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-             
-              <View>
-                <Text category="h6" style={{ marginBottom: 4, color: '#00BFA5', fontWeight: 'bold' }}>Bienvenido!</Text>
-                <Text category="p2" appearance="hint">Ingresá tus credenciales</Text>
-              </View>
-            </View>
-          </Card>
+          {/* Inputs de login */}
+          <Input
+            placeholder="Documento"
+            value={documento}
+            onChangeText={setDocumento}
+            accessoryLeft={PersonIcon}
+            keyboardType="numeric"
+            autoCapitalize="none"
+            autoCorrect={false}
+            size="large"
+            style={{ marginBottom: 16, borderRadius: 12 }}
+          />
 
+          <Input
+            placeholder="Contraseña"
+            value={password}
+            onChangeText={setPassword}
+            accessoryLeft={LockIcon}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            size="large"
+            style={{ marginBottom: 24, borderRadius: 12 }}
+          />
 
-      <Input
-        placeholder="Documento"
-        value={documento}
-        onChangeText={setDocumento}
-        accessoryLeft={PersonIcon}
-        keyboardType="numeric"
-        autoCapitalize="none"
-        autoCorrect={false}
-        size="large"
-        style={{ marginBottom: 16, borderRadius: 12 }}
-      />
+          <Button 
+            onPress={handleLogin} 
+            disabled={loading || !documento || !password} 
+            size="large"
+            style={{ borderRadius: 12, marginBottom: 12 }}
+            accessoryRight={loading ? (props) => <Spinner {...props} size="small" status="basic" /> : undefined}
+          >
+            {loading ? 'Ingresando...' : 'Ingresar'}
+          </Button>
 
-      <Input
-        placeholder="Contraseña"
-        value={password}
-        onChangeText={setPassword}
-        accessoryLeft={LockIcon}
-        secureTextEntry
-        autoCapitalize="none"
-        autoCorrect={false}
-        size="large"
-        style={{ marginBottom: 16, borderRadius: 12 }}
-      />
-
-      <Button 
-        onPress={handleLogin} 
-        disabled={loading || !documento || !password} 
-        size="large"
-        style={{ borderRadius: 12, marginBottom: 12 }}
-      >
-        {loading ? 'Ingresando...' : 'Ingresar'}
-      </Button>
-
-      {biometricAvailable && biometricEnabled && (
-        <Button 
-          onPress={authenticateWithBiometrics} 
-          appearance="ghost"
-          size="large"
-          accessoryLeft={FingerprintIcon}
-          style={{ borderRadius: 12 }}
-        >
-          Usar Huella/Face ID
-        </Button>
-      )}
+          {biometricAvailable && biometricEnabled && (
+            <Button 
+              onPress={authenticateWithBiometrics} 
+              appearance="ghost"
+              size="large"
+              accessoryLeft={FingerprintIcon}
+              style={{ borderRadius: 12 }}
+            >
+              Usar Huella/Face ID
+            </Button>
+          )}
         </ScrollView>
       </Layout>
     </>
@@ -292,11 +416,14 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 }
 
 // 🏠 HOME
-function HomeScreen({ onLogout }: { onLogout: () => void }) {
+function HomeScreen({ onLogout, isDarkMode, toggleDarkMode }: { onLogout: () => void; isDarkMode: boolean; toggleDarkMode: () => Promise<void> }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mensajes, setMensajes] = useState<any[]>([]);
   const [tutorNombre, setTutorNombre] = useState<string>('');
   const mensajesNoLeidos = mensajes.filter((m: any) => !m.leido).length;
+  
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
   
   // Cargar nombre del tutor
   useEffect(() => {
@@ -390,63 +517,99 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
 
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor="#00BFA5" />
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#00BFA5' }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.accent_primary} />
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg_app }}>
         {/* Header personalizado - Compacto */}
         <View style={{ 
-          backgroundColor: '#00BFA5',
+          backgroundColor: colors.accent_primary,
           paddingTop: 15,
           paddingBottom: 15,
           paddingHorizontal: 16
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              {/* Logo y título */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                <View style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
-                  overflow: 'hidden',
-                  marginRight: 10
-                }}>
-                  <TeresaLogoIcon size={36} />
-                </View>
-                <View>
-                  <Text category="s1" style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>
-                    {getTituloActivo()}
+              {/* Izquierda - Sección y Usuario */}
+              <View style={{ flex: 1 }}>
+                <Text category="s1" style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>
+                  {getTituloActivo()}
+                </Text>
+                {tutorNombre && (
+                  <Text category="c1" style={{ color: '#FFFFFF', fontSize: 10, marginTop: 2, opacity: 0.9 }}>
+                    {tutorNombre}
                   </Text>
-                  {tutorNombre && (
-                    <Text category="c1" style={{ color: 'rgba(255,255,255,0.95)', fontSize: 11, marginTop: 1 }}>
-                      {tutorNombre}
-                    </Text>
-                  )}
-                </View>
+                )}
               </View>
               
-              {/* Botón de configuraciones - Solo visible si NO estás en configuraciones */}
+              {/* Centro - DHORA */}
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <Text style={{
+                  fontSize: 12,
+                  fontWeight: '300',
+                  color: '#FFFFFF',
+                  letterSpacing: 4,
+                  fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+                  textTransform: 'uppercase',
+                  marginBottom: 2,
+                }}>
+                  DHORA
+                </Text>
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '300',
+                  color: '#FFFFFF',
+                  letterSpacing: 0.5,
+                  fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+                  opacity: 0.85,
+                }}>
+                  Colegio Millaray
+                </Text>
+              </View>
+              
+              {/* Derecha - Acciones */}
               {activeTab !== 'configuraciones' && (
-                <TouchableOpacity 
-                  onPress={() => handleTabChange('configuraciones')}
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: 'rgba(255,255,255,0.25)',
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}
-                >
-                  <Icon 
-                    name="settings-outline" 
-                    fill="#FFFFFF" 
-                    style={{ width: 22, height: 22 }} 
-                  />
-                </TouchableOpacity>
+                <View style={{ flex: 1, alignItems: 'flex-end', flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+                  {/* Botón de modo oscuro */}
+                  <TouchableOpacity 
+                    onPress={toggleDarkMode}
+                    style={{ 
+                      width: 36, 
+                      height: 36, 
+                      borderRadius: 18, 
+                      backgroundColor: 'rgba(255,255,255,0.25)',
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Icon 
+                      name={isDarkMode ? 'sun' : 'moon'}
+                      fill="#FFFFFF" 
+                      style={{ width: 22, height: 22 }} 
+                    />
+                  </TouchableOpacity>
+
+                  {/* Botón de configuraciones */}
+                  <TouchableOpacity 
+                    onPress={() => handleTabChange('configuraciones')}
+                    style={{ 
+                      width: 36, 
+                      height: 36, 
+                      borderRadius: 18, 
+                      backgroundColor: 'rgba(255,255,255,0.25)',
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Icon 
+                      name="settings-outline" 
+                      fill="#FFFFFF" 
+                      style={{ width: 22, height: 22 }} 
+                    />
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
         </View>
 
-      <View style={{ flex: 1, position: 'relative' }}>
+      <View style={{ flex: 1, position: 'relative', backgroundColor: colors.bg_primary }}>
         {activeTab === 'mensajes' && (
           <MensajesTab 
             onMensajesUpdate={setMensajes} 
@@ -454,6 +617,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             alumnos={alumnos}
             selectedAlumnoId={selectedAlumnoId}
             setSelectedAlumnoId={setSelectedAlumnoId}
+            isDarkMode={isDarkMode}
           />
         )}
         {activeTab === 'dashboard' && (
@@ -462,6 +626,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             selectedAlumnoId={selectedAlumnoId}
             setSelectedAlumnoId={setSelectedAlumnoId}
             setActiveTab={setActiveTab}
+            isDarkMode={isDarkMode}
           />
         )}
         {activeTab === 'asistencias' && (
@@ -469,6 +634,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             alumnos={alumnos}
             selectedAlumnoId={selectedAlumnoId}
             setSelectedAlumnoId={setSelectedAlumnoId}
+            isDarkMode={isDarkMode}
           />
         )}
         {activeTab === 'evaluaciones' && (
@@ -476,6 +642,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             alumnos={alumnos}
             selectedAlumnoId={selectedAlumnoId}
             setSelectedAlumnoId={setSelectedAlumnoId}
+            isDarkMode={isDarkMode}
           />
         )}
         {activeTab === 'seguimiento' && tieneMaternalAlumno && (
@@ -483,9 +650,10 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             alumnos={alumnos}
             selectedAlumnoId={selectedAlumnoId}
             setSelectedAlumnoId={setSelectedAlumnoId}
+            isDarkMode={isDarkMode}
           />
         )}
-        {activeTab === 'configuraciones' && <ConfiguracionesTab onLogout={onLogout} />}
+        {activeTab === 'configuraciones' && <ConfiguracionesTab onLogout={onLogout} isDarkMode={isDarkMode} />}
         
         {/* Blur overlay durante transición - Fondo opaco */}
         {isTransitioning && Platform.OS === 'ios' && (
@@ -495,7 +663,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             left: 0, 
             right: 0, 
             bottom: 0,
-            backgroundColor: '#FFFFFF'
+            backgroundColor: colors.bg_primary
           }}>
             <Animated.View style={{ 
               flex: 1,
@@ -503,15 +671,14 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             }}>
               <BlurView
                 style={{ flex: 1 }}
-                blurType="light"
-                blurAmount={10}
-                reducedTransparencyFallbackColor="white"
+                intensity={10}
+                tint="light"
               />
             </Animated.View>
           </View>
         )}
         
-        {/* Fallback para Android - overlay blanco opaco */}
+        {/* Fallback para Android - overlay opaco */}
         {isTransitioning && Platform.OS === 'android' && (
           <Animated.View style={{ 
             position: 'absolute', 
@@ -519,7 +686,7 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
             left: 0, 
             right: 0, 
             bottom: 0,
-            backgroundColor: '#FFFFFF',
+            backgroundColor: colors.bg_primary,
             opacity: blurOpacity
           }} />
         )}
@@ -540,63 +707,83 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
           </View>
         )}
 
-        {/* TAB BAR FLOTANTE */}
+        {/* TAB BAR FLOTANTE CON INICIO EN EL MEDIO */}
         <View style={{ 
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backgroundColor: 'rgba(0, 0, 0, 0.95)',
           borderTopWidth: 1,
-          borderTopColor: 'rgba(255, 255, 255, 0.1)',
+          borderTopColor: isDarkMode ? colors.border_subtle : colors.border_subtle,
           flexDirection: 'row',
           paddingVertical: 12,
           paddingHorizontal: 10,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 12
+          paddingBottom: Platform.OS === 'ios' ? 20 : 12,
+          alignItems: 'center'
         }}>
-          <Button
-            appearance={activeTab === 'dashboard' ? 'filled' : 'ghost'}
-            accessoryLeft={(props) => <Icon {...props} name="home-outline" width={26} height={26} />}
-            onPress={() => handleTabChange('dashboard')}
-            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-            size="small"
-          />
-          
-          <Button
-            appearance={activeTab === 'mensajes' ? 'filled' : 'ghost'}
-            accessoryLeft={(props) => <Icon {...props} name="email-outline" width={26} height={26} />}
-            onPress={() => handleTabChange('mensajes')}
-            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-            size="small"
-          />
-          
-          <Button
-            appearance={activeTab === 'asistencias' ? 'filled' : 'ghost'}
-            accessoryLeft={(props) => <Icon {...props} name="calendar-outline" width={26} height={26} />}
-            onPress={() => handleTabChange('asistencias')}
-            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-            size="small"
-          />
-          
-          {/* Tab universal de Evaluaciones */}
-          <Button
-            appearance={activeTab === 'evaluaciones' ? 'filled' : 'ghost'}
-            accessoryLeft={(props) => <Icon {...props} name="bar-chart-outline" width={26} height={26} />}
-            onPress={() => handleTabChange('evaluaciones')}
-            style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
-            size="small"
-          />
-          
-          {/* Tab Seguimiento - Solo visible si hay alumnos de nivel MATERNAL */}
-          {tieneMaternalAlumno && (
+          {/* LADO IZQUIERDO */}
+          <View style={{ flex: 1, flexDirection: 'row', gap: 8 }}>
             <Button
-              appearance={activeTab === 'seguimiento' ? 'filled' : 'ghost'}
-              accessoryLeft={(props) => <Icon {...props} name="activity-outline" width={26} height={26} />}
-              onPress={() => handleTabChange('seguimiento')}
-              style={{ flex: 1, marginHorizontal: 4, borderRadius: 3 }}
+              appearance={activeTab === 'mensajes' ? 'filled' : 'ghost'}
+              accessoryLeft={(props) => <Icon {...props} name="email-outline" width={26} height={26} />}
+              onPress={() => handleTabChange('mensajes')}
+              style={{ flex: 1, borderRadius: 3 }}
               size="small"
             />
-          )}
+            
+            <Button
+              appearance={activeTab === 'asistencias' ? 'filled' : 'ghost'}
+              accessoryLeft={(props) => <Icon {...props} name="calendar-outline" width={26} height={26} />}
+              onPress={() => handleTabChange('asistencias')}
+              style={{ flex: 1, borderRadius: 3 }}
+              size="small"
+            />
+          </View>
+
+          {/* CENTRO - INICIO CON MAYOR DESTAQUE */}
+          <View style={{ 
+            marginHorizontal: 8,
+            shadowColor: '#764BA2',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.4,
+            shadowRadius: 8,
+            elevation: 5
+          }}>
+            <Button
+              appearance={activeTab === 'dashboard' ? 'filled' : 'ghost'}
+              accessoryLeft={(props) => <Icon {...props} name="home-outline" width={32} height={32} />}
+              onPress={() => handleTabChange('dashboard')}
+              style={{ 
+                minHeight: 48,
+                minWidth: 48,
+                borderRadius: 50,
+              }}
+              size="small"
+            />
+          </View>
+
+          {/* LADO DERECHO */}
+          <View style={{ flex: 1, flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+            <Button
+              appearance={activeTab === 'evaluaciones' ? 'filled' : 'ghost'}
+              accessoryLeft={(props) => <Icon {...props} name="bar-chart-outline" width={26} height={26} />}
+              onPress={() => handleTabChange('evaluaciones')}
+              style={{ flex: 1, borderRadius: 3 }}
+              size="small"
+            />
+            
+            {/* Tab Seguimiento - Solo visible si hay alumnos de nivel MATERNAL */}
+            {tieneMaternalAlumno && (
+              <Button
+                appearance={activeTab === 'seguimiento' ? 'filled' : 'ghost'}
+                accessoryLeft={(props) => <Icon {...props} name="activity-outline" width={26} height={26} />}
+                onPress={() => handleTabChange('seguimiento')}
+                style={{ flex: 1, borderRadius: 3 }}
+                size="small"
+              />
+            )}
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -608,16 +795,20 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
 function FiltroAlumnos({ 
   alumnos, 
   selectedAlumnoId, 
-  setSelectedAlumnoId 
+  setSelectedAlumnoId,
+  isDarkMode = false
 }: { 
   alumnos: any[]; 
   selectedAlumnoId: string | null; 
   setSelectedAlumnoId: (id: string | null) => void;
+  isDarkMode?: boolean;
 }) {
+  const colors = getColors(isDarkMode);
+  
   if (alumnos.length <= 1) return null;
   
   return (
-    <View style={{ padding: 16, paddingBottom: 0 }}>
+    <View style={{ padding: 16, paddingBottom: 0, backgroundColor: colors.bg_primary }}>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
@@ -643,7 +834,7 @@ function FiltroAlumnos({
           </Button>
         ))}
       </ScrollView>
-      <Divider style={{ marginTop: 8 }} />
+      <Divider style={{ marginTop: 8, backgroundColor: colors.border_subtle }} />
     </View>
   );
 }
@@ -654,21 +845,31 @@ function MensajesTab({
   alumnoId, 
   alumnos, 
   selectedAlumnoId, 
-  setSelectedAlumnoId 
+  setSelectedAlumnoId,
+  isDarkMode = false
 }: { 
   onMensajesUpdate: (mensajes: any[]) => void; 
   alumnoId?: string;
   alumnos: any[];
   selectedAlumnoId: string | null;
   setSelectedAlumnoId: (id: string | null) => void;
+  isDarkMode?: boolean;
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMensaje, setSelectedMensaje] = useState<any>(null);
   const [showNuevoMensaje, setShowNuevoMensaje] = useState(false);
   const [responderA, setResponderA] = useState<any>(null);
+  const [imageViewingIndex, setImageViewingIndex] = useState(0);
+  const [showImageViewing, setShowImageViewing] = useState(false);
+  
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
+  
+  console.log('📨 [MensajesTab] selectedAlumnoId:', selectedAlumnoId, 'variables.alumnoId será:', selectedAlumnoId || undefined);
   
   const { data, loading, error, refetch } = useQuery(GET_MENSAJES_TUTOR, {
-    variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {}
+    variables: { alumnoId: selectedAlumnoId || undefined },
+    fetchPolicy: 'network-only', // 🔄 Siempre traer datos frescos del servidor, no usar cache
   });
   const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
 
@@ -792,21 +993,88 @@ function MensajesTab({
     return tipo.replace(/_/g, ' ');
   };
 
+  const downloadImage = async (imageUri: string, messageTitle: string) => {
+    try {
+      if (!imageUri) {
+        Alert.alert('Error', 'No hay imagen para descargar');
+        return;
+      }
+
+      // Solicitar permisos para acceder a la galería
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso denegado', 'Se necesita acceso a la galería de fotos para descargar las imágenes.');
+        return;
+      }
+
+      console.log('📥 Iniciando descarga de imagen...');
+
+      // Si es base64, intentar guardar directamente
+      if (imageUri.startsWith('data:image')) {
+        console.log('📸 Detectado: imagen base64, intentando guardar directamente...');
+        try {
+          // Intentar crear asset directamente del data URI
+          const asset = await MediaLibrary.createAssetAsync(imageUri);
+          const album = await MediaLibrary.getAlbumAsync('Dhora');
+          
+          if (album == null) {
+            await MediaLibrary.createAlbumAsync('Dhora', asset, false);
+          } else {
+            await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+          }
+
+          Alert.alert('✓ Descargado', `Imagen guardada en Galería\nÁlbum: Dhora`, [
+            { text: 'OK', style: 'default' }
+          ]);
+          return;
+        } catch (error: any) {
+          console.log('⚠️ No se pudo guardar directamente el base64. Error:', error.message);
+          Alert.alert('Información', 'Para usar la descarga de imágenes base64, crea un build de desarrollo (EAS Build). En Expo Go, solo funcionan URLs remotas.');
+          return;
+        }
+      }
+
+      // Para URLs remotas
+      console.log('🌐 Detectado: URL remota');
+      try {
+        const asset = await MediaLibrary.createAssetAsync(imageUri);
+        const album = await MediaLibrary.getAlbumAsync('Dhora');
+        
+        if (album == null) {
+          await MediaLibrary.createAlbumAsync('Dhora', asset, false);
+        } else {
+          await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+        }
+
+        Alert.alert('✓ Descargado', `Imagen guardada en Galería\nÁlbum: Dhora`, [
+          { text: 'OK', style: 'default' }
+        ]);
+      } catch (remoteError: any) {
+        console.error('❌ Error con URL remota:', remoteError);
+        Alert.alert('Error', `No se pudo descargar la imagen:\n${remoteError.message}`);
+      }
+    } catch (error: any) {
+      console.error('❌ Error descargando imagen:', error);
+      Alert.alert('Error', `Error inesperado:\n${error.message || 'Error desconocido'}`);
+    }
+  };
+
   // Ya no mostramos loading aquí, lo maneja la transición de tabs
 
   return (
     <>
-      <Layout style={{ flex: 1 }}>
+      <Layout style={{ flex: 1, backgroundColor: colors.bg_primary }}>
         {/* Selector de alumno */}
         <FiltroAlumnos 
           alumnos={alumnos}
           selectedAlumnoId={selectedAlumnoId}
           setSelectedAlumnoId={setSelectedAlumnoId}
+          isDarkMode={isDarkMode}
         />
         
         <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          style={{ flex: 1, backgroundColor: colors.bg_primary }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100, backgroundColor: colors.bg_primary }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           {loading && !refreshing ? (
@@ -819,39 +1087,39 @@ function MensajesTab({
                   style={{ 
                     marginBottom: 16, 
                     borderRadius: 16, 
-                    backgroundColor: '#F8FAFB',
+                    backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB',
                     borderWidth: 1,
-                    borderColor: '#E6EBF0'
+                    borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0'
                   }}
                 >
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                     <View style={{ flex: 1, gap: 8 }}>
-                      <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
-                      <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                      <View style={{ width: '70%', height: 16, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
+                      <View style={{ width: '40%', height: 12, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
                     </View>
-                    <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                    <View style={{ width: 60, height: 20, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 8 }} />
                   </View>
-                  <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
-                  <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                  <View style={{ width: '100%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                  <View style={{ width: '85%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
                 </Card>
               ))}
             </>
           ) : mensajes.length === 0 ? (
-            <Card disabled style={{ borderRadius: 20, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
+            <Card disabled style={{ borderRadius: 20, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: colors.border_subtle }}>
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                 <View style={{ 
                   width: 100, 
                   height: 100, 
                   borderRadius: 50, 
-                  backgroundColor: '#E6F7F4', 
+                  backgroundColor: isDarkMode ? colors.bg_tertiary : '#F0E6F7', 
                   justifyContent: 'center', 
                   alignItems: 'center',
                   marginBottom: 20
                 }}>
-                  <Icon name="email-outline" style={{ width: 50, height: 50 }} fill="#00BFA5" />
+                  <Icon name="email-outline" style={{ width: 50, height: 50 }} fill={colors.accent_purple} />
                 </View>
-                <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>No hay mensajes</Text>
-                <Text appearance="hint">
+                <Text category="h6" style={{ marginBottom: 8, color: colors.accent_primary }}>No hay mensajes</Text>
+                <Text appearance="hint" style={{ color: colors.text_tertiary }}>
                   {selectedAlumnoId ? 'No hay mensajes para este alumno' : 'Los mensajes aparecerán aquí'}
                 </Text>
               </View>
@@ -860,16 +1128,22 @@ function MensajesTab({
           mensajes.map((mensaje: any, index: number) => {
             const alumnoDelMensaje = getAlumnoByDestinatarioId(mensaje);
             
+            // Debug: Verificar si hay imagen
+            const imagenURL = mensaje.imagenes && mensaje.imagenes.length > 0 ? mensaje.imagenes[0] : mensaje.imagen;
+            if (imagenURL) {
+              console.log(`📸 [Mensaje ${mensaje.id}] Tiene imagen: ${(imagenURL.length / 1024).toFixed(2)} KB`);
+            }
+            
             return (
             <Card
               key={mensaje.id || index}
               style={{ 
                 marginBottom: 16, 
                 borderRadius: 16, 
-                backgroundColor: '#FFFFFF',
+                backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF',
                 borderWidth: 1,
-                borderColor: mensaje.leido ? '#E6EBF0' : '#00BFA5',
-                shadowColor: '#00BFA5',
+                borderColor: mensaje.leido ? colors.border_subtle : colors.accent_primary,
+                shadowColor: '#764BA2',
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: mensaje.leido ? 0 : 0.1,
                 shadowRadius: 8,
@@ -877,137 +1151,144 @@ function MensajesTab({
               }}
               onPress={() => handleAbrirMensaje(mensaje)}
             >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text category="h6" numberOfLines={1} style={{ color: '#1A1F36', fontWeight: '700' }}>
-                    {mensaje.titulo || 'Sin título'}
-                  </Text>
-                  
-                  {/* Indicador del alumno */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                    <Icon name="person-outline" style={{ width: 14, height: 14, marginRight: 4 }} fill="#00BFA5" />
-                    <Text category="c1" style={{ color: '#00BFA5', fontWeight: '600' }}>
-                      {alumnoDelMensaje 
-                        ? `${alumnoDelMensaje.nombre} ${alumnoDelMensaje.apellido}` 
-                        : 'Cargando alumno...'}
-                    </Text>
-                  </View>
-                  
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, flexWrap: 'wrap', gap: 6 }}>
-                    {mensaje.tipo && (
-                      <View style={{ 
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        backgroundColor: 
-                          mensaje.tipo === 'GENERAL' ? '#E6F7FF' :
-                          mensaje.tipo === 'ACADEMICO' ? '#F0E6FF' :
-                          mensaje.tipo === 'ADMINISTRATIVO' ? '#FFE6E6' :
-                          mensaje.tipo === 'EVENTO' ? '#E6FFE6' :
-                          mensaje.tipo === 'CONSULTA_TUTOR' ? '#FFF3E6' :
-                          '#FFF9E6',
-                        borderRadius: 8
+              {/* Encabezado: Tipo/Alcance y Fecha */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                  {mensaje.tipo && (
+                    <View style={{ 
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      backgroundColor: isDarkMode
+                        ? (mensaje.tipo === 'GENERAL' ? '#1a3a4d' :
+                           mensaje.tipo === 'ACADEMICO' ? '#2d1a4d' :
+                           mensaje.tipo === 'ADMINISTRATIVO' ? '#4d1a1a' :
+                           mensaje.tipo === 'EVENTO' ? '#1a4d2f' :
+                           mensaje.tipo === 'CONSULTA_TUTOR' ? '#4d2e1a' :
+                           '#4d4d1a')
+                        : (mensaje.tipo === 'GENERAL' ? '#E6F7FF' :
+                           mensaje.tipo === 'ACADEMICO' ? '#F0E6FF' :
+                           mensaje.tipo === 'ADMINISTRATIVO' ? '#FFE6E6' :
+                           mensaje.tipo === 'EVENTO' ? '#E6FFE6' :
+                           mensaje.tipo === 'CONSULTA_TUTOR' ? '#FFF3E6' :
+                           '#FFF9E6'),
+                      borderRadius: 8
+                    }}>
+                      <Text style={{ 
+                        color: isDarkMode
+                          ? (mensaje.tipo === 'GENERAL' ? '#80d4ff' :
+                             mensaje.tipo === 'ACADEMICO' ? '#d4a0ff' :
+                             mensaje.tipo === 'ADMINISTRATIVO' ? '#ff8080' :
+                             mensaje.tipo === 'EVENTO' ? '#80ff99' :
+                             mensaje.tipo === 'CONSULTA_TUTOR' ? '#ffc080' :
+                             '#ffff80')
+                          : (mensaje.tipo === 'GENERAL' ? '#0369A1' :
+                             mensaje.tipo === 'ACADEMICO' ? '#6D28D9' :
+                             mensaje.tipo === 'ADMINISTRATIVO' ? '#B91C1C' :
+                             mensaje.tipo === 'EVENTO' ? '#764BA2' :
+                             mensaje.tipo === 'CONSULTA_TUTOR' ? '#EA580C' :
+                             '#A67C00'),
+                        fontWeight: '600', 
+                        fontSize: 9 
                       }}>
-                        <Text style={{ 
-                          color: 
-                            mensaje.tipo === 'GENERAL' ? '#0369A1' :
-                            mensaje.tipo === 'ACADEMICO' ? '#6D28D9' :
-                            mensaje.tipo === 'ADMINISTRATIVO' ? '#B91C1C' :
-                            mensaje.tipo === 'EVENTO' ? '#047857' :
-                            mensaje.tipo === 'CONSULTA_TUTOR' ? '#EA580C' :
-                            '#A67C00',
-                          fontWeight: '600', 
-                          fontSize: 10 
-                        }}>
-                          {formatTipo(mensaje.tipo, mensaje.autorNombre)}
-                        </Text>
-                      </View>
-                    )}
-                    {!mensaje.leido && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <View style={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: 4, 
-                          backgroundColor: '#00E096', 
-                          marginRight: 4 
-                        }} />
-                        <Text category="c2" style={{ color: '#00BFA5', fontWeight: 'bold', fontSize: 10 }}>
-                          NUEVO
-                        </Text>
-                      </View>
-                    )}
-                    {mensaje.imagen && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Icon name="image-outline" style={{ width: 12, height: 12, marginRight: 4 }} fill="#00BFA5" />
-                        <Text category="c2" style={{ color: '#00BFA5', fontWeight: '600', fontSize: 10 }}>
-                          CON IMAGEN
-                        </Text>
-                      </View>
-                    )}
-                  </View>
+                        {formatTipo(mensaje.tipo, mensaje.autorNombre)}
+                      </Text>
+                    </View>
+                  )}
+                  {mensaje.alcance && (
+                    <View style={{ 
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      backgroundColor: isDarkMode ? colors.bg_tertiary : colors.bg_secondary,
+                      borderRadius: 8
+                    }}>
+                      <Text style={{ 
+                        color: colors.text_secondary,
+                        fontWeight: '500', 
+                        fontSize: 9 
+                      }}>
+                        {mensaje.alcance}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <View style={{ 
-                  paddingHorizontal: 8, 
-                  paddingVertical: 4, 
-                  backgroundColor: '#F8FAFB', 
-                  borderRadius: 8 
-                }}>
-                  <Text category="c1" appearance="hint" style={{ fontSize: 11 }}>
-                    {formatDate(mensaje.publicadoEn || mensaje.creadoEn)}
-                  </Text>
-                </View>
+                <Text category="c1" appearance="hint" style={{ fontSize: 9, color: colors.text_tertiary, marginLeft: 8 }}>
+                  {formatDate(mensaje.publicadoEn || mensaje.creadoEn)}
+                </Text>
               </View>
-              {/* Miniatura de imagen si existe */}
-              {mensaje.imagen && (
-                <View style={{ marginBottom: 12, borderRadius: 8, overflow: 'hidden' }}>
-                  <Image
-                    source={{ uri: mensaje.imagen }}
-                    style={{
-                      width: '100%',
-                      height: 120,
-                      backgroundColor: '#E6EBF0',
-                    }}
-                    onError={(error) => {
-                      console.warn('🖼️❌ Error loading preview image for mensaje:', mensaje.id);
-                    }}
-                  />
+
+              {/* Título */}
+              <Text category="s2" numberOfLines={1} style={{ color: colors.text_primary, fontWeight: '700', marginBottom: 8 }}>
+                {mensaje.titulo || 'Sin título'}
+              </Text>
+              
+              {/* Indicador del alumno */}
+              <Text category="c1" style={{ color: colors.accent_primary, fontWeight: '600', marginBottom: 8 }}>
+                Para: {alumnoDelMensaje 
+                  ? `${alumnoDelMensaje.nombre} ${alumnoDelMensaje.apellido}` 
+                  : 'Cargando alumno...'}
+              </Text>
+              
+              {/* Indicadores adicionales: NUEVO */}
+              {!mensaje.leido && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <View style={{ 
+                    width: 8, 
+                    height: 8, 
+                    borderRadius: 4,
+                    backgroundColor: colors.accent_rose, 
+                    marginRight: 4 
+                  }} />
+                  <Text category="c2" style={{ color: colors.accent_rose, fontWeight: 'bold', fontSize: 10 }}>
+                    NUEVO
+                  </Text>
                 </View>
               )}
-              <Text numberOfLines={2} appearance="hint" category="p2" style={{ lineHeight: 20 }}>
+              {/* Miniatura de imagen si existe */}
+              {/* NO mostrar imagen en la lista - solo icono */}
+              <Text numberOfLines={2} appearance="hint" category="p2" style={{ lineHeight: 20, color: colors.text_secondary, marginBottom: 12 }}>
                 {mensaje.contenido || 'Sin contenido'}
               </Text>
+              
+              {/* Indicador de adjunto en la esquina inferior derecha */}
+              {(mensaje.imagenes && mensaje.imagenes.length > 0) || mensaje.imagen ? (
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 14, color: colors.accent_primary }}>
+                    📎
+                  </Text>
+                </View>
+              ) : null}
             </Card>
             );
           })
         )}
         </ScrollView>
         
-        {/* Botón flotante para nuevo mensaje */}
+        {/* Botón flotante para nuevo mensaje - Estilo moderno */}
         <TouchableOpacity
           style={{
             position: 'absolute',
             bottom: 100,
             right: 20,
-            width: 60,
-            height: 60,
-            borderRadius: 30,
-            backgroundColor: '#00E096',
+            backgroundColor: colors.accent_primary,
+            borderRadius: 12,
+            width: 48,
+            height: 48,
             justifyContent: 'center',
             alignItems: 'center',
-            shadowColor: '#00E096',
+            shadowColor: colors.accent_primary,
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
+            shadowOpacity: 0.4,
             shadowRadius: 8,
-            elevation: 8
+            elevation: 6
           }}
           onPress={() => {
             setResponderA(null);
             setShowNuevoMensaje(true);
           }}
         >
-          <Icon name="plus-outline" style={{ width: 30, height: 30 }} fill="#FFFFFF" />
+          <Icon name="plus-outline" style={{ width: 24, height: 24 }} fill="#FFFFFF" />
         </TouchableOpacity>
       </Layout>
 
@@ -1021,7 +1302,7 @@ function MensajesTab({
           <View 
             style={{ 
               flex: 1, 
-              backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.5)', 
               justifyContent: 'center', 
               alignItems: 'center',
               padding: 20
@@ -1033,13 +1314,13 @@ function MensajesTab({
               onPress={() => setSelectedMensaje(null)}
             />
             
-            <View style={{ width: '100%', maxWidth: 450, zIndex: 1 }}>
+            <View style={{ width: '100%', maxWidth: 1000, zIndex: 1 }}>
               <Card 
                 disabled 
                 style={{ 
                   borderRadius: 24,
                   backgroundColor: '#FFFFFF',
-                  shadowColor: '#000',
+                  shadowColor: '#1A1A2E',
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.2,
                   shadowRadius: 12,
@@ -1048,23 +1329,11 @@ function MensajesTab({
               >
                 <ScrollView 
                   showsVerticalScrollIndicator={false}
-                  style={{ maxHeight: 650 }}
-                  contentContainerStyle={{ padding: 16 }}
+                  style={{ maxHeight: 750 }}
+                  contentContainerStyle={{ padding: 2 }}
                   nestedScrollEnabled={true}
                 >
                   <View style={{ marginBottom: 16 }}>
-                    <Text 
-                      style={{ 
-                        marginBottom: 12, 
-                        fontSize: 20, 
-                        fontWeight: '700', 
-                        color: '#1A1F36',
-                        lineHeight: 28
-                      }}
-                    >
-                      {selectedMensaje.titulo || 'Sin título'}
-                    </Text>
-                    
                     {(() => {
                       const alumnoDelMensajeModal = getAlumnoByDestinatarioId(selectedMensaje);
                       return alumnoDelMensajeModal && (
@@ -1074,20 +1343,20 @@ function MensajesTab({
                           marginBottom: 12,
                           paddingHorizontal: 12,
                           paddingVertical: 8,
-                          backgroundColor: '#E6F7F4',
+                          backgroundColor: '#F0E6F7',
                           borderRadius: 10,
                           borderLeftWidth: 3,
-                          borderLeftColor: '#00BFA5'
+                          borderLeftColor: '#764BA2'
                         }}>
-                          <Icon name="person-outline" style={{ width: 18, height: 18, marginRight: 8 }} fill="#00BFA5" />
-                          <Text style={{ color: '#00BFA5', fontWeight: '700', fontSize: 14 }}>
+                          <Icon name="person-outline" style={{ width: 18, height: 18, marginRight: 8 }} fill="#764BA2" />
+                          <Text style={{ color: '#764BA2', fontWeight: '700', fontSize: 14 }}>
                             Para: {alumnoDelMensajeModal.nombre} {alumnoDelMensajeModal.apellido}
                           </Text>
                         </View>
                       );
                     })()}
                     
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, gap: 8 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12, gap: 8 }}>
                       {selectedMensaje.tipo && (
                         <View style={{ 
                           flexDirection: 'row', 
@@ -1118,7 +1387,7 @@ function MensajesTab({
                               selectedMensaje.tipo === 'GENERAL' ? '#0095FF' :
                               selectedMensaje.tipo === 'ACADEMICO' ? '#8B5CF6' :
                               selectedMensaje.tipo === 'ADMINISTRATIVO' ? '#EF4444' :
-                              selectedMensaje.tipo === 'EVENTO' ? '#10B981' :
+                              selectedMensaje.tipo === 'EVENTO' ? '#764BA2' :
                               selectedMensaje.tipo === 'CONSULTA_TUTOR' ? '#EA580C' :
                               '#FFB020'
                             }
@@ -1128,7 +1397,7 @@ function MensajesTab({
                               selectedMensaje.tipo === 'GENERAL' ? '#0369A1' :
                               selectedMensaje.tipo === 'ACADEMICO' ? '#6D28D9' :
                               selectedMensaje.tipo === 'ADMINISTRATIVO' ? '#B91C1C' :
-                              selectedMensaje.tipo === 'EVENTO' ? '#047857' :
+                              selectedMensaje.tipo === 'EVENTO' ? '#764BA2' :
                               selectedMensaje.tipo === 'CONSULTA_TUTOR' ? '#EA580C' :
                               '#A67C00',
                             fontWeight: '600', 
@@ -1164,53 +1433,144 @@ function MensajesTab({
                       paddingHorizontal: 12,
                       paddingVertical: 8,
                       borderRadius: 12,
-                      alignSelf: 'flex-start'
+                      alignSelf: 'flex-start',
+                      marginBottom: 12
                     }}>
-                      <Icon name="calendar-outline" style={{ width: 16, height: 16, marginRight: 8 }} fill="#00BFA5" />
-                      <Text style={{ color: '#00BFA5', fontWeight: '600', fontSize: 12 }}>
+                      <Icon name="calendar-outline" style={{ width: 16, height: 16, marginRight: 8 }} fill="#764BA2" />
+                      <Text style={{ color: '#764BA2', fontWeight: '600', fontSize: 12 }}>
                         {selectedMensaje.publicadoEn || selectedMensaje.creadoEn ? formatDate(selectedMensaje.publicadoEn || selectedMensaje.creadoEn) : 'Sin fecha'}
                       </Text>
                     </View>
+                    
+                    {/* Título pequeño después de la fecha */}
+                    <Text 
+                      style={{ 
+                        fontSize: 17, 
+                        fontWeight: '700', 
+                        color: '#1A1F36',
+                        lineHeight: 22,
+                        marginBottom: 8
+                      }}
+                    >
+                      {selectedMensaje.titulo || 'Sin título'}
+                    </Text>
                   </View>
                   
-                  <Divider style={{ marginVertical: 16, backgroundColor: '#E6EBF0' }} />
+                  <Divider style={{ marginVertical: 8, backgroundColor: '#E6EBF0' }} />
                   
                   <View style={{ marginBottom: 20 }}>
                     <Text 
                       style={{ 
                         lineHeight: 24, 
                         color: '#2D3748', 
-                        fontSize: 15
+                        fontSize: 15,
+                        textAlign: 'justify'
                       }}
                     >
                       {selectedMensaje.contenido || 'Sin contenido'}
                     </Text>
                   </View>
                   
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {/* Solo mostrar botón Responder si el mensaje NO fue enviado por un tutor */}
-                    {selectedMensaje.tipo !== 'CONSULTA_TUTOR' && (
+                  {/* Mostrar imágenes si existen */}
+                  {(selectedMensaje.imagenes && selectedMensaje.imagenes.length > 0) || selectedMensaje.imagen ? (
+                    <View style={{ marginBottom: 20 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#764BA2', marginBottom: 12 }}>
+                        📎 ARCHIVOS ADJUNTOS ({(selectedMensaje.imagenes && selectedMensaje.imagenes.length > 0 ? selectedMensaje.imagenes.length : 1)})
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                        {(selectedMensaje.imagenes && selectedMensaje.imagenes.length > 0 ? selectedMensaje.imagenes : [selectedMensaje.imagen]).map((img: string, idx: number) => (
+                          <TouchableOpacity
+                            key={idx}
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              setImageViewingIndex(idx);
+                              setShowImageViewing(true);
+                            }}
+                            style={{ marginRight: 12, borderRadius: 12, overflow: 'hidden' }}
+                          >
+                            <Image
+                              source={{ uri: img }}
+                              style={{
+                                width: 280,
+                                height: 280,
+                                borderRadius: 12,
+                              }}
+                              onError={(error) => {
+                                console.warn('🖼️❌ Error loading image for mensaje:', selectedMensaje.id);
+                              }}
+                            />
+                            <View
+                              style={{
+                                position: 'absolute',
+                                top: 8,
+                                left: 8,
+                                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                                borderRadius: 8,
+                                padding: 8,
+                              }}
+                            >
+                              <Icon name="expand-outline" style={{ width: 24, height: 24 }} fill="#FFFFFF" />
+                            </View>
+                            <TouchableOpacity
+                              style={{
+                                position: 'absolute',
+                                bottom: 8,
+                                right: 8,
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                borderRadius: 8,
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                              }}
+                              onPress={() => downloadImage(img, selectedMensaje.titulo || 'Descarga')}
+                            >
+                              <Icon name="download-outline" style={{ width: 14, height: 14, marginRight: 6 }} fill="#FFFFFF" />
+                              <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 11 }}>Descargar</Text>
+                            </TouchableOpacity>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  ) : null}
+                  
+                  <View style={{ 
+                    flexDirection: 'row', 
+                    gap: 8,
+                    paddingTop: 16,
+                    marginTop: 16,
+                    borderTopWidth: 1,
+                    borderTopColor: '#E6EBF0',
+                    justifyContent: 'flex-end'
+                  }}>
+                    {/* Solo mostrar botón Responder si el alcance es ALUMNO */}
+                    {selectedMensaje.alcance === 'ALUMNO' && (
                       <Button 
-                        style={{ borderRadius: 14, flex: 1 }} 
+                        style={{ 
+                          borderRadius: 10,
+                          minHeight: 32,
+                          paddingHorizontal: 12
+                        }} 
                         appearance="outline"
+                        size="small"
                         onPress={() => {
                           setResponderA(selectedMensaje);
                           setSelectedMensaje(null);
                           setShowNuevoMensaje(true);
                         }}
-                        size="medium"
-                        accessoryLeft={(props) => <Icon {...props} name="corner-up-left-outline" />}
+                        accessoryLeft={(props) => <Icon {...props} name="corner-up-left-outline" style={{ width: 14, height: 14 }} />}
                       >
                         Responder
                       </Button>
                     )}
                     <Button 
                       style={{ 
-                        borderRadius: 14, 
-                        flex: selectedMensaje.tipo === 'CONSULTA_TUTOR' ? 1 : 1 
+                        borderRadius: 10,
+                        minHeight: 32,
+                        paddingHorizontal: 12
                       }} 
+                      size="small"
                       onPress={() => setSelectedMensaje(null)}
-                      size="medium"
                     >
                       Cerrar
                     </Button>
@@ -1222,6 +1582,19 @@ function MensajesTab({
         </Modal>
       )}
       
+      {/* ImageViewing - Expandir imágenes con zoom */}
+      {selectedMensaje && (
+        <ImageViewing
+          images={(selectedMensaje.imagenes && selectedMensaje.imagenes.length > 0 ? selectedMensaje.imagenes : [selectedMensaje.imagen]).map((img: string) => ({ uri: img }))}
+          imageIndex={imageViewingIndex}
+          visible={showImageViewing}
+          onRequestClose={() => setShowImageViewing(false)}
+          swipeToCloseEnabled={true}
+          doubleTapToZoomEnabled={true}
+          delayLongPress={100}
+        />
+      )}
+      
       {/* Modal para nuevo mensaje o responder */}
       {showNuevoMensaje && (
         <NuevoMensajeModal
@@ -1231,10 +1604,10 @@ function MensajesTab({
             setResponderA(null);
           }}
           responderA={responderA}
-          onEnviado={() => {
+          onEnviado={async () => {
             setShowNuevoMensaje(false);
             setResponderA(null);
-            refetch();
+            await refetch();
           }}
         />
       )}
@@ -1247,7 +1620,7 @@ function NuevoMensajeModal({ visible, onClose, responderA, onEnviado }: {
   visible: boolean; 
   onClose: () => void; 
   responderA?: any;
-  onEnviado: () => void;
+  onEnviado: () => Promise<void> | void;
 }) {
   const { data: alumnosData } = useQuery(GET_ALUMNOS_TUTOR);
   const [enviarMensaje, { loading }] = useMutation(gql`
@@ -1267,9 +1640,16 @@ function NuevoMensajeModal({ visible, onClose, responderA, onEnviado }: {
         titulo
         contenido
         tipo
+        alcance
         estado
         autorNombre
         publicadoEn
+        creadoEn
+        leido
+        leidoPorTutorIds
+        destinatarioIds
+        imagen
+        imagenes
       }
     }
   `);
@@ -1310,12 +1690,18 @@ function NuevoMensajeModal({ visible, onClose, responderA, onEnviado }: {
           titulo: asunto.trim(),
           contenido: mensaje.trim(),
           mensajeOriginalId: responderA?.id || null
-        }
+        },
+        refetchQueries: [
+          { 
+            query: GET_MENSAJES_TUTOR,
+            variables: { alumnoId: alumnoSeleccionado }
+          }
+        ]
       });
       
       console.log('✅ Mensaje enviado:', result);
       Alert.alert('Éxito', 'Mensaje enviado correctamente');
-      onEnviado();
+      await onEnviado();
     } catch (error: any) {
       console.error('❌ Error al enviar mensaje:', error);
       console.error('   Error completo:', JSON.stringify(error, null, 2));
@@ -1356,7 +1742,7 @@ function NuevoMensajeModal({ visible, onClose, responderA, onEnviado }: {
           borderTopRightRadius: 24,
           paddingTop: 8,
           maxHeight: '90%',
-          shadowColor: '#000',
+          shadowColor: '#1A1A2E',
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.1,
           shadowRadius: 12,
@@ -1391,7 +1777,7 @@ function NuevoMensajeModal({ visible, onClose, responderA, onEnviado }: {
                 borderRadius: 12,
                 marginBottom: 16,
                 borderLeftWidth: 3,
-                borderLeftColor: '#00BFA5'
+                borderLeftColor: '#764BA2'
               }}>
                 <Text category="c1" appearance="hint" style={{ marginBottom: 4 }}>
                   Respondiendo a:
@@ -1531,17 +1917,11 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
     }
   }, [alumnoId]);
   
-  // Si hay alumnos pero no hay seleccionado, seleccionar el primero automáticamente
-  useEffect(() => {
-    if (alumnos.length > 0 && !selectedAlumno) {
-      setSelectedAlumno(alumnos[0].id);
-    }
-  }, [alumnos.length]);
+  // NO seleccionar automáticamente - mantener en "TODOS" (null) por defecto
   
-  // Query para obtener calificaciones - SOLO ejecutar si hay alumno seleccionado
+  // Query para obtener calificaciones - Ejecutar siempre (alumnoId puede ser null para "TODOS")
   const { data: calificacionesData, loading: loadingCalificaciones, refetch: refetchCalificaciones } = useQuery(GET_CALIFICACIONES, {
-    variables: { alumnoId: selectedAlumno },
-    skip: !selectedAlumno
+    variables: { alumnoId: selectedAlumno }
   });
   
   const materias = calificacionesData?.calificacionesTutor || [];
@@ -1604,11 +1984,11 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
 
   return (
     <Layout style={{ flex: 1 }}>
-      {/* Selector de alumno si hay más de uno */}
-      {alumnos.length > 1 && (
+      {/* Selector de alumno - siempre visible para permitir ver "TODOS" */}
+      {alumnos.length > 0 && (
         <View style={{ padding: 16, backgroundColor: '#F8FAFB', borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
           <Text category="s2" style={{ marginBottom: 8, fontWeight: 'bold' }}>
-            Seleccionar alumno:
+            Filtrar por alumno:
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -1642,8 +2022,8 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#00BFA5']}
-            tintColor="#00BFA5"
+            colors={['#764BA2']}
+            tintColor="#764BA2"
           />
         }
       >
@@ -1690,7 +2070,7 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
                     {/* Promedio */}
                     <View style={{ alignItems: 'center', marginRight: 12 }}>
                       <Text category="h4" style={{ 
-                        color: promedio >= 7 ? '#00BFA5' : promedio >= 4 ? '#FFB020' : '#FF6B6B',
+                        color: promedio >= 7 ? '#764BA2' : promedio >= 4 ? '#FFB020' : '#FF6B6B',
                         fontWeight: 'bold'
                       }}>
                         {promedio > 0 ? promedio.toFixed(1) : '-'}
@@ -1770,7 +2150,7 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
                                 <View key={nota.id} style={{ alignItems: 'center', marginBottom: 4 }}>
                                   <Text category="h4" style={{ 
                                     fontWeight: 'bold',
-                                    color: nota.nota >= 7 ? '#00BFA5' : nota.nota >= 4 ? '#FFB020' : '#FF6B6B'
+                                    color: nota.nota >= 7 ? '#764BA2' : nota.nota >= 4 ? '#FFB020' : '#FF6B6B'
                                   }}>
                                     {nota.nota > 0 ? nota.nota : '-'}
                                   </Text>
@@ -1801,39 +2181,49 @@ function CalificacionesTab({ alumnoId }: { alumnoId?: string }) {
 function EvaluacionesTab({ 
   alumnos, 
   selectedAlumnoId, 
-  setSelectedAlumnoId 
+  setSelectedAlumnoId,
+  isDarkMode = false
 }: { 
   alumnos: any[]; 
   selectedAlumnoId: string | null;
   setSelectedAlumnoId: (id: string | null) => void;
+  isDarkMode?: boolean;
 }) {
   const [selectedMateriaIndex, setSelectedMateriaIndex] = useState<IndexPath>(new IndexPath(0));
   const [refreshing, setRefreshing] = useState(false);
   
-  // Si hay alumnos pero no hay seleccionado, seleccionar el primero automáticamente
-  useEffect(() => {
-    if (alumnos.length > 0 && !selectedAlumnoId) {
-      setSelectedAlumnoId(alumnos[0].id);
-    }
-  }, [alumnos.length]);
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
+  
+  // NO auto-seleccionar alumno - mantener en "TODOS" (null) por defecto
   
   // Obtener alumno seleccionado y su nivel
   const alumnoActual = alumnos.find((a: any) => a.id === selectedAlumnoId);
   const nivelAlumno = alumnoActual?.nivel || 'PRIMARIO';
-  const esNivelInicial = nivelAlumno === 'MATERNAL' || nivelAlumno === 'INICIAL';
   
-  const shouldSkipCalificaciones = !selectedAlumnoId || esNivelInicial;
-  const shouldSkipObservaciones = !selectedAlumnoId || !esNivelInicial;
+  // Cuando hay selección de alumno, usar su nivel
+  // Cuando es "TODO" (selectedAlumnoId = null), mostrar ambos (campos formativos + evaluaciones)
+  const esNivelInicial = selectedAlumnoId ? (nivelAlumno === 'MATERNAL' || nivelAlumno === 'INICIAL') : false;
+  const esTodo = !selectedAlumnoId;
+  
+  // Lógica de skip NUNCA skipear si es "TODO" - queremos ambas
+  // Si alumno seleccionado:
+  //   - Si es nivel inicial, skipear calificaciones
+  //   - Si NO es nivel inicial, skipear observaciones
+  const shouldSkipCalificaciones = selectedAlumnoId ? (alumnos.length === 0 || esNivelInicial) : false;
+  const shouldSkipObservaciones = selectedAlumnoId ? (alumnos.length === 0 || !esNivelInicial) : false;
   
   // Query para calificaciones (Primario/Secundario)
+  // Si selectedAlumnoId existe, filtrar por alumno; si es null, traer todos
   const { data: calificacionesData, loading: loadingCalificaciones, error: errorCalificaciones, refetch: refetchCalificaciones } = useQuery(GET_CALIFICACIONES, {
-    variables: { alumnoId: selectedAlumnoId },
+    variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {},
     skip: shouldSkipCalificaciones
   });
   
   // Query para observaciones iniciales (Maternal/Inicial)
+  // Cuando es "TODO" (!selectedAlumnoId), esta query TAMBIÉN corre
   const { data: observacionesData, loading: loadingObservaciones, error: errorObservaciones, refetch: refetchObservaciones } = useQuery(GET_OBSERVACIONES_INICIAL, {
-    variables: { alumnoId: selectedAlumnoId },
+    variables: selectedAlumnoId ? { alumnoId: selectedAlumnoId } : {},
     skip: shouldSkipObservaciones
   });
   
@@ -1841,19 +2231,39 @@ function EvaluacionesTab({
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
-      if (esNivelInicial) {
+      if (selectedAlumnoId && esNivelInicial) {
+        // Alumno seleccionado de nivel inicial - solo observaciones
         await refetchObservaciones();
-      } else {
+      } else if (selectedAlumnoId && !esNivelInicial) {
+        // Alumno seleccionado de nivel superior - solo calificaciones
         await refetchCalificaciones();
+      } else if (!selectedAlumnoId) {
+        // TODO - traer ambas
+        await refetchCalificaciones();
+        await refetchObservaciones();
       }
     } catch (error) {
       console.error('Error al refrescar:', error);
     }
     setRefreshing(false);
-  }, [esNivelInicial, refetchCalificaciones, refetchObservaciones]);
+  }, [selectedAlumnoId, esNivelInicial, refetchCalificaciones, refetchObservaciones]);
   
   const materias = calificacionesData?.calificacionesTutor || [];
-  const observaciones = observacionesData?.observacionesInicialesTutor || [];
+  const observacionesRaw = observacionesData?.observacionesInicialesTutor || [];
+  
+  // Agregar alumnoId a las observaciones si es "TODO"
+  const observaciones = React.useMemo(() => {
+    if (selectedAlumnoId) {
+      // Si hay alumno seleccionado, solo agregar su ID
+      return observacionesRaw.map((obs: any) => ({
+        ...obs,
+        alumnoId: selectedAlumnoId
+      }));
+    } else {
+      // Si es "TODO", mantener las observaciones como están (ya deberían tener alumnoId del backend)
+      return observacionesRaw;
+    }
+  }, [observacionesRaw, selectedAlumnoId]);
   
   // Preparar lista de evaluaciones cronológicas
   const evaluacionesCronologicas = React.useMemo(() => {
@@ -1862,14 +2272,35 @@ function EvaluacionesTab({
     materias.forEach((materia: any) => {
       if (materia.evaluaciones && materia.evaluaciones.length > 0) {
         materia.evaluaciones.forEach((evaluacion: any) => {
-          const notaAlumno = evaluacion.notas?.find((n: any) => n.alumnoId === selectedAlumnoId);
-          if (notaAlumno || evaluacion.notas?.length === 0) { // Mostrar si tiene nota o si no hay notas aún
-            lista.push({
-              ...evaluacion,
-              materiaNombre: materia.nombre,
-              materiaId: materia.id,
-              notaAlumno
-            });
+          if (selectedAlumnoId) {
+            // Si hay un alumno seleccionado, filtrar solo sus notas
+            const notaAlumno = evaluacion.notas?.find((n: any) => n.alumnoId === selectedAlumnoId);
+            if (notaAlumno || evaluacion.notas?.length === 0) {
+              lista.push({
+                ...evaluacion,
+                materiaNombre: materia.nombre,
+                materiaId: materia.id,
+                notaAlumno,
+                alumnoId: selectedAlumnoId
+              });
+            }
+          } else {
+            // Si NO hay alumno seleccionado (mostrar TODO), agregar TODAS las notas PERO SOLO de alumnos del tutor
+            if (evaluacion.notas && evaluacion.notas.length > 0) {
+              evaluacion.notas.forEach((notaAlumno: any) => {
+                // Verificar que el alumno pertenece al tutor
+                const alumnoExiste = alumnos.some((a: any) => a.id === notaAlumno.alumnoId);
+                if (alumnoExiste) {
+                  lista.push({
+                    ...evaluacion,
+                    materiaNombre: materia.nombre,
+                    materiaId: materia.id,
+                    notaAlumno,
+                    alumnoId: notaAlumno.alumnoId
+                  });
+                }
+              });
+            }
           }
         });
       }
@@ -1911,30 +2342,33 @@ function EvaluacionesTab({
   }, [selectedMateriaIndex, materiasUnicas]);
   
   return (
-    <Layout style={{ flex: 1 }} level="2">
+    <Layout style={{ flex: 1, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }} level="2">
       {/* Selector de alumno */}
       <FiltroAlumnos 
         alumnos={alumnos}
         selectedAlumnoId={selectedAlumnoId}
         setSelectedAlumnoId={setSelectedAlumnoId}
+        isDarkMode={isDarkMode}
       />
       
       {/* Indicador de nivel */}
-      <View style={{ backgroundColor: esNivelInicial ? '#E6F7F4' : '#E3F2FD', padding: 12 }}>
-        <Text appearance="hint" category="c1" style={{ textAlign: 'center', color: esNivelInicial ? '#00BFA5' : '#2196F3' }}>
-          {nivelAlumno ? `Nivel ${nivelAlumno.charAt(0) + nivelAlumno.slice(1).toLowerCase()} - ${esNivelInicial ? 'Campos Formativos' : 'Evaluaciones'}` : 'Cargando...'}
-        </Text>
-      </View>
+      {!esTodo && (
+        <View style={{ backgroundColor: isDarkMode ? colors.bg_secondary : (esNivelInicial ? '#F0E6F7' : '#E3F2FD'), padding: 12 }}>
+          <Text appearance="hint" category="c1" style={{ textAlign: 'center', color: isDarkMode ? colors.text_tertiary : (esNivelInicial ? '#764BA2' : '#2196F3') }}>
+            {nivelAlumno ? `Nivel ${nivelAlumno.charAt(0) + nivelAlumno.slice(1).toLowerCase()} - ${esNivelInicial ? 'Campos Formativos' : 'Evaluaciones'}` : 'Cargando...'}
+          </Text>
+        </View>
+      )}
       
       <ScrollView 
-        style={{ flex: 1 }} 
+        style={{ flex: 1, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }}
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#00BFA5']}
-            tintColor="#00BFA5"
+            colors={['#764BA2']}
+            tintColor="#764BA2"
           />
         }
       >
@@ -1948,88 +2382,526 @@ function EvaluacionesTab({
                 style={{ 
                   marginBottom: 16, 
                   borderRadius: 16, 
-                  backgroundColor: '#F8FAFB',
+                  backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB',
                   borderWidth: 1,
-                  borderColor: '#E6EBF0'
+                  borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0'
                 }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                   <View style={{ flex: 1, gap: 8 }}>
-                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
-                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '70%', height: 16, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
                   </View>
-                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                  <View style={{ width: 60, height: 20, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 8 }} />
                 </View>
-                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
-                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                <View style={{ width: '100%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
               </Card>
             ))}
           </>
+        ) : !selectedAlumnoId ? (
+          // VISTA PARA "TODO" - Agrupar por alumno
+          <>
+            {/* Agrupar alumnos con sus evaluaciones */}
+            {alumnos.length > 0 && alumnos.map((alumno: any) => {
+              // Obtener observaciones del alumno
+              const obsAlumno = observaciones.filter((o: any) => o.alumnoId === alumno.id);
+              // Obtener evaluaciones del alumno
+              const evalAlumno = evaluacionesFiltradas.filter((e: any) => e.alumnoId === alumno.id);
+              
+              // Si no tiene ni observaciones ni evaluaciones, saltarlo
+              if (obsAlumno.length === 0 && evalAlumno.length === 0) return null;
+              
+              const tieneObservaciones = obsAlumno.length > 0;
+              const tieneEvaluaciones = evalAlumno.length > 0;
+              
+              return (
+                <View key={alumno.id} style={{ marginBottom: 24 }}>
+                  {/* Header del alumno con nivel y tipo de evaluación */}
+                  <View style={{ 
+                    backgroundColor: isDarkMode ? colors.bg_tertiary : '#F0E6F7',
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    marginBottom: 12,
+                    borderLeftWidth: 4,
+                    borderLeftColor: '#764BA2'
+                  }}>
+                    <Text category="s1" style={{ 
+                      color: isDarkMode ? colors.text_primary : '#764BA2',
+                      fontWeight: '700',
+                      marginBottom: 4
+                    }}>
+                      👤 {alumno.nombre} {alumno.apellido}
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                      <View style={{ 
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        backgroundColor: isDarkMode ? colors.bg_secondary : '#E3F2FD',
+                        borderRadius: 6
+                      }}>
+                        <Text category="c2" style={{ color: '#2196F3', fontWeight: '600', fontSize: 11 }}>
+                          Nivel: {alumno.nivel}
+                        </Text>
+                      </View>
+                      {tieneObservaciones && (
+                        <View style={{ 
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          backgroundColor: isDarkMode ? colors.bg_secondary : '#FFF8E1',
+                          borderRadius: 6
+                        }}>
+                          <Text category="c2" style={{ color: '#FFB020', fontWeight: '600', fontSize: 11 }}>
+                            Campos Formativos
+                          </Text>
+                        </View>
+                      )}
+                      {tieneEvaluaciones && (
+                        <View style={{ 
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          backgroundColor: isDarkMode ? colors.bg_secondary : '#E8F5E9',
+                          borderRadius: 6
+                        }}>
+                          <Text category="c2" style={{ color: '#4CAF50', fontWeight: '600', fontSize: 11 }}>
+                            Calificaciones
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  
+                  {/* Campos Formativos del alumno */}
+                  {tieneObservaciones && (
+                    <>
+                      {obsAlumno.map((obs: any) => (
+                        <View key={obs.id} style={{ marginBottom: 12 }}>
+                          {/* Header del período */}
+                          <Text category="p1" style={{ 
+                            marginBottom: 8, 
+                            color: colors.accent_primary, 
+                            fontWeight: '600',
+                            fontSize: 12
+                          }}>
+                            📅 Período: {obs.periodo}
+                          </Text>
+                          
+                          {/* Campos Formativos con diseño mejorado */}
+                          {obs.camposFormativos?.map((campo: any, idx: number) => {
+                            // Determinar estado general del campo
+                            const tieneLogros = campo.logrosAlcanzados && campo.logrosAlcanzados.length > 0;
+                            const tieneEnDesarrollo = campo.enDesarrollo && campo.enDesarrollo.length > 0;
+                            const tieneEnRevision = campo.enRevision && campo.enRevision.length > 0;
+                            
+                            // Color indicador principal basado en estado
+                            let colorIndicador = '#8F9BB3'; // Neutral
+                            
+                            if (tieneEnRevision) {
+                              colorIndicador = '#FFB020';
+                            } else if (tieneEnDesarrollo) {
+                              colorIndicador = '#4A90E2';
+                            } else if (tieneLogros) {
+                              colorIndicador = '#764BA2';
+                            }
+                            
+                            return (
+                              <Card 
+                                key={idx} 
+                                style={{ 
+                                  marginBottom: 10, 
+                                  borderRadius: 12, 
+                                  backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF',
+                                  borderWidth: 1,
+                                  borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0',
+                                  borderLeftWidth: 4,
+                                  borderLeftColor: colorIndicador
+                                }}
+                              >
+                                {/* Nombre del campo */}
+                                <Text category="s1" style={{ 
+                                  color: isDarkMode ? colors.text_primary : '#1A1A2E',
+                                  fontWeight: '600',
+                                  marginBottom: 12
+                                }}>
+                                  {campo.campoFormativoNombre}
+                                </Text>
+                                
+                                {/* Sección de logros alcanzados */}
+                                {tieneLogros && (
+                                  <View style={{ marginBottom: 12 }}>
+                                    <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                                      ✓ Logros alcanzados
+                                    </Text>
+                                    <View style={{ paddingLeft: 12 }}>
+                                      {campo.logrosAlcanzados.map((logro: string, i: number) => (
+                                        <Text key={i} category="p2" style={{ 
+                                          color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                          marginBottom: 4,
+                                          lineHeight: 18
+                                        }}>
+                                          • {logro}
+                                        </Text>
+                                      ))}
+                                    </View>
+                                  </View>
+                                )}
+                                
+                                {/* Sección en desarrollo */}
+                                {tieneEnDesarrollo && (
+                                  <View style={{ marginBottom: 12 }}>
+                                    <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                                      ⟳ En desarrollo
+                                    </Text>
+                                    <View style={{ paddingLeft: 12 }}>
+                                      {campo.enDesarrollo.map((item: string, i: number) => (
+                                        <Text key={i} category="p2" style={{ 
+                                          color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                          marginBottom: 4,
+                                          lineHeight: 18
+                                        }}>
+                                          • {item}
+                                        </Text>
+                                      ))}
+                                    </View>
+                                  </View>
+                                )}
+                                
+                                {/* Sección en revisión */}
+                                {tieneEnRevision && (
+                                  <View style={{ marginBottom: 12 }}>
+                                    <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                                      ! En revisión
+                                    </Text>
+                                    <View style={{ paddingLeft: 12 }}>
+                                      {campo.enRevision.map((item: string, i: number) => (
+                                        <Text key={i} category="p2" style={{ 
+                                          color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                          marginBottom: 4,
+                                          lineHeight: 18
+                                        }}>
+                                          • {item}
+                                        </Text>
+                                      ))}
+                                    </View>
+                                  </View>
+                                )}
+                                
+                                {/* Observaciones específicas del campo */}
+                                {campo.observaciones && (
+                                  <Text appearance="hint" category="c1" style={{ 
+                                    color: isDarkMode ? colors.text_tertiary : '#666',
+                                    fontStyle: 'italic'
+                                  }}>
+                                    {campo.observaciones}
+                                  </Text>
+                                )}
+                              </Card>
+                            );
+                          })}
+                          
+                          {/* Observaciones generales */}
+                          {obs.observacionesGenerales && (
+                            <Card style={{ 
+                              marginTop: 8,
+                              marginBottom: 12,
+                              borderRadius: 12,
+                              backgroundColor: isDarkMode ? colors.bg_tertiary : '#F8FAFB',
+                              borderWidth: 1,
+                              borderColor: isDarkMode ? colors.border_medium : '#E6EBF0',
+                              borderLeftWidth: 4,
+                              borderLeftColor: '#FFB020'
+                            }}>
+                              <Text category="s2" style={{ 
+                                marginBottom: 6, 
+                                color: isDarkMode ? colors.text_primary : '#1A1A2E',
+                                fontWeight: '600'
+                              }}>
+                                Observaciones Generales
+                              </Text>
+                              <Text appearance="hint" style={{ 
+                                color: isDarkMode ? colors.text_tertiary : '#666',
+                                lineHeight: 20
+                              }}>
+                                {obs.observacionesGenerales}
+                              </Text>
+                            </Card>
+                          )}
+                        </View>
+                      ))}
+                    </>
+                  )}
+                  
+                  {/* Evaluaciones del alumno */}
+                  {tieneEvaluaciones && (
+                    <>
+                      {evalAlumno.map((evaluacion: any, idx: number) => {
+                        const calificacion = evaluacion.notaAlumno?.calificacion;
+                        
+                        // Obtener el valor correcto según el tipo de calificación
+                        let valorMostrar = 'S/N';
+                        let color = '#8F9BB3';
+                        
+                        if (calificacion) {
+                          if (calificacion.tipo === 'NUMERICA' && calificacion.valorNumerico != null) {
+                            valorMostrar = calificacion.valorNumerico.toFixed(2);
+                            color = calificacion.valorNumerico >= 7 ? '#764BA2' : calificacion.valorNumerico >= 4 ? '#FF9800' : '#F44336';
+                          } else if (calificacion.tipo === 'CONCEPTUAL' && calificacion.valorConceptual) {
+                            valorMostrar = calificacion.valorConceptual;
+                            color = calificacion.aprobado ? '#764BA2' : '#F44336';
+                          }
+                        }
+                        
+                        return (
+                          <Card key={`${evaluacion._id}-${idx}`} style={{ marginBottom: 10, borderRadius: 12, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
+                            {/* Fecha */}
+                            <View style={{ marginBottom: 8 }}>
+                              <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', fontSize: 11 }}>
+                                {new Date(evaluacion.fecha).toLocaleDateString('es-AR', { 
+                                  weekday: 'long', 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric' 
+                                })}
+                              </Text>
+                            </View>
+                            
+                            {/* Materia */}
+                            <Text category="s1" style={{ color: isDarkMode ? colors.text_primary : '#1A1A2E', marginBottom: 10, fontWeight: '600', fontSize: 13 }}>
+                              {evaluacion.materiaNombre}
+                            </Text>
+                            
+                            {/* Calificación */}
+                            <View style={{ 
+                              backgroundColor: isDarkMode ? colors.bg_tertiary : '#F0E6F7',
+                              padding: 10,
+                              borderRadius: 8, 
+                              borderLeftWidth: 4, 
+                              borderLeftColor: color,
+                              marginBottom: 8
+                            }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text category="c2" style={{ color, fontWeight: '600', fontSize: 12 }}>Calificación</Text>
+                                <Text category="h6" style={{ color }}>
+                                  {valorMostrar}
+                                </Text>
+                              </View>
+                            </View>
+                            
+                            {/* Observaciones de la nota */}
+                            {evaluacion.notaAlumno?.observaciones && (
+                              <View style={{ 
+                                backgroundColor: isDarkMode ? colors.bg_tertiary : '#F0E6F7', 
+                                padding: 8, 
+                                borderRadius: 6
+                              }}>
+                                <Text appearance="hint" category="c2" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 4, fontSize: 11 }}>
+                                  Observación:
+                                </Text>
+                                <Text category="p2" style={{ color: isDarkMode ? colors.text_secondary : '#4A5568', fontSize: 12 }}>
+                                  {evaluacion.notaAlumno.observaciones}
+                                </Text>
+                              </View>
+                            )}
+                            
+                            {/* Indicador de recuperatorio */}
+                            {evaluacion.esRecuperatorio && (
+                              <View style={{ 
+                                marginTop: 8, 
+                                backgroundColor: '#FFF3E0', 
+                                padding: 6, 
+                                borderRadius: 6
+                              }}>
+                                <Text category="c2" style={{ color: '#FF9800', fontWeight: '600', fontSize: 11 }}>
+                                  🔄 Recuperatorio
+                                </Text>
+                              </View>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </>
+                  )}
+                </View>
+              );
+            })}
+            
+            {/* Si no hay nada, mostrar mensaje */}
+            {(() => {
+              const alumnosConDatos = alumnos.filter((a: any) => {
+                const obs = observaciones.filter((o: any) => o.alumnoId === a.id);
+                const evaluacion = evaluacionesFiltradas.filter((e: any) => e.alumnoId === a.id);
+                return obs.length > 0 || evaluacion.length > 0;
+              });
+              return alumnosConDatos.length === 0;
+            })() && (
+              <Card disabled style={{ borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <Icon name="book-outline" style={{ width: 60, height: 60, marginBottom: 16 }} fill="#764BA2" />
+                  <Text category="h6" style={{ marginBottom: 8, color: '#764BA2' }}>Sin datos</Text>
+                  <Text appearance="hint" style={{ color: isDarkMode ? colors.text_tertiary : '#666' }}>No hay evaluaciones ni observaciones registradas</Text>
+                </View>
+              </Card>
+            )}
+          </>
         ) : esNivelInicial ? (
-          // VISTA PARA MATERNAL/INICIAL - Campos Formativos
+          // VISTA PARA MATERNAL/INICIAL - Campos Formativos (ALUMNO SELECCIONADO)
           observaciones.length === 0 ? (
-            <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
+            <Card disabled style={{ borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <Icon name="book-outline" style={{ width: 60, height: 60, marginBottom: 16 }} fill="#00BFA5" />
-                <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>Sin observaciones</Text>
+                <Icon name="book-outline" style={{ width: 60, height: 60, marginBottom: 16 }} fill="#764BA2" />
+                <Text category="h6" style={{ marginBottom: 8, color: '#764BA2' }}>Sin observaciones</Text>
                 <Text appearance="hint">No hay observaciones registradas aún</Text>
               </View>
             </Card>
           ) : (
             observaciones.map((obs: any) => (
-              <Card key={obs.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
-                <Text category="h6" style={{ marginBottom: 12, color: '#00BFA5' }}>
-                  Período: {obs.periodo}
+              <View key={obs.id} style={{ marginBottom: 16 }}>
+                {/* Header del período */}
+                <Text category="h6" style={{ marginBottom: 12, color: colors.accent_primary, fontWeight: '600' }}>
+                  📅 {obs.periodo}
                 </Text>
-                <Divider style={{ marginBottom: 12 }} />
                 
-                {obs.camposFormativos?.map((campo: any, idx: number) => (
-                  <View key={idx} style={{ marginBottom: 16 }}>
-                    <Text category="s1" style={{ marginBottom: 8 }}>{campo.campoFormativoNombre}</Text>
-                    
-                    {campo.logrosAlcanzados && campo.logrosAlcanzados.length > 0 && (
-                      <View style={{ marginBottom: 4 }}>
-                        <Text appearance="hint" category="c1">✓ Logros alcanzados:</Text>
-                        {campo.logrosAlcanzados.map((logro: string, i: number) => (
-                          <Text key={i} category="p2" style={{ marginLeft: 16 }}>• {logro}</Text>
-                        ))}
-                      </View>
-                    )}
-                    
-                    {campo.enDesarrollo && campo.enDesarrollo.length > 0 && (
-                      <View style={{ marginBottom: 4 }}>
-                        <Text appearance="hint" category="c1">🕐 En desarrollo:</Text>
-                        {campo.enDesarrollo.map((item: string, i: number) => (
-                          <Text key={i} category="p2" style={{ marginLeft: 16 }}>• {item}</Text>
-                        ))}
-                      </View>
-                    )}
-                    
-                    {campo.enRevision && campo.enRevision.length > 0 && (
-                      <View style={{ marginBottom: 4 }}>
-                        <Text appearance="hint" category="c1">! En revisión:</Text>
-                        {campo.enRevision.map((item: string, i: number) => (
-                          <Text key={i} category="p2" style={{ marginLeft: 16 }}>• {item}</Text>
-                        ))}
-                      </View>
-                    )}
-                    
-                    {campo.observaciones && (
-                      <Text appearance="hint" category="c1" style={{ marginTop: 4, fontStyle: 'italic' }}>
-                        Obs: {campo.observaciones}
+                {/* Campos Formativos agrupados */}
+                {obs.camposFormativos?.map((campo: any, idx: number) => {
+                  // Determinar estado general del campo
+                  const tieneLogros = campo.logrosAlcanzados && campo.logrosAlcanzados.length > 0;
+                  const tieneEnDesarrollo = campo.enDesarrollo && campo.enDesarrollo.length > 0;
+                  const tieneEnRevision = campo.enRevision && campo.enRevision.length > 0;
+                  
+                  // Color indicador principal basado en estado
+                  let colorIndicador = '#8F9BB3'; // Neutral
+                  
+                  if (tieneEnRevision) {
+                    colorIndicador = '#FFB020';
+                  } else if (tieneEnDesarrollo) {
+                    colorIndicador = '#4A90E2';
+                  } else if (tieneLogros) {
+                    colorIndicador = '#764BA2';
+                  }
+                  
+                  return (
+                    <Card 
+                      key={idx} 
+                      style={{ 
+                        marginBottom: 12, 
+                        borderRadius: 12, 
+                        backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0',
+                        borderLeftWidth: 4,
+                        borderLeftColor: colorIndicador
+                      }}
+                    >
+                      {/* Nombre del campo */}
+                      <Text category="s1" style={{ 
+                        color: isDarkMode ? colors.text_primary : '#1A1A2E',
+                        fontWeight: '600',
+                        marginBottom: 12
+                      }}>
+                        {campo.campoFormativoNombre}
                       </Text>
-                    )}
-                  </View>
-                ))}
+                      
+                      {/* Sección de logros alcanzados */}
+                      {tieneLogros && (
+                        <View style={{ marginBottom: 12 }}>
+                          <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                            ✓ Logros alcanzados
+                          </Text>
+                          <View style={{ paddingLeft: 12 }}>
+                            {campo.logrosAlcanzados.map((logro: string, i: number) => (
+                              <Text key={i} category="p2" style={{ 
+                                color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                marginBottom: 4,
+                                lineHeight: 18
+                              }}>
+                                • {logro}
+                              </Text>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      
+                      {/* Sección en desarrollo */}
+                      {tieneEnDesarrollo && (
+                        <View style={{ marginBottom: 12 }}>
+                          <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                            ⟳ En desarrollo
+                          </Text>
+                          <View style={{ paddingLeft: 12 }}>
+                            {campo.enDesarrollo.map((item: string, i: number) => (
+                              <Text key={i} category="p2" style={{ 
+                                color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                marginBottom: 4,
+                                lineHeight: 18
+                              }}>
+                                • {item}
+                              </Text>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      
+                      {/* Sección en revisión */}
+                      {tieneEnRevision && (
+                        <View style={{ marginBottom: 12 }}>
+                          <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666', marginBottom: 6, fontWeight: '600' }}>
+                            ! En revisión
+                          </Text>
+                          <View style={{ paddingLeft: 12 }}>
+                            {campo.enRevision.map((item: string, i: number) => (
+                              <Text key={i} category="p2" style={{ 
+                                color: isDarkMode ? colors.text_secondary : '#4A5568',
+                                marginBottom: 4,
+                                lineHeight: 18
+                              }}>
+                                • {item}
+                              </Text>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+                      
+                      {/* Observaciones específicas del campo */}
+                      {campo.observaciones && (
+                        <Text appearance="hint" category="c1" style={{ 
+                          color: isDarkMode ? colors.text_tertiary : '#666',
+                          fontStyle: 'italic'
+                        }}>
+                          {campo.observaciones}
+                        </Text>
+                      )}
+                    </Card>
+                  );
+                })}
                 
+                {/* Observaciones generales */}
                 {obs.observacionesGenerales && (
-                  <>
-                    <Divider style={{ marginVertical: 12 }} />
-                    <Text category="s2" style={{ marginBottom: 4 }}>Observaciones Generales:</Text>
-                    <Text appearance="hint">{obs.observacionesGenerales}</Text>
-                  </>
+                  <Card style={{ 
+                    marginTop: 8,
+                    borderRadius: 12,
+                    backgroundColor: isDarkMode ? colors.bg_tertiary : '#F8FAFB',
+                    borderWidth: 1,
+                    borderColor: isDarkMode ? colors.border_medium : '#E6EBF0',
+                    borderLeftWidth: 4,
+                    borderLeftColor: '#FFB020'
+                  }}>
+                    <Text category="s2" style={{ 
+                      marginBottom: 6, 
+                      color: isDarkMode ? colors.text_primary : '#1A1A2E',
+                      fontWeight: '600'
+                    }}>
+                      Observaciones Generales
+                    </Text>
+                    <Text appearance="hint" style={{ 
+                      color: isDarkMode ? colors.text_tertiary : '#666',
+                      lineHeight: 20
+                    }}>
+                      {obs.observacionesGenerales}
+                    </Text>
+                  </Card>
                 )}
-              </Card>
+              </View>
             ))
           )
         ) : (
@@ -2037,24 +2909,23 @@ function EvaluacionesTab({
           <>
             {/* Filtro por materia con Select dropdown */}
             {materiasUnicas.length > 0 && (
-              <Card style={{ marginBottom: 16, borderRadius: 12 }}>
-                <Text category="label" appearance="hint" style={{ marginBottom: 8 }}>
+              <Card style={{ marginBottom: 16, borderRadius: 12, backgroundColor: isDarkMode ? colors.bg_tertiary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_medium : '#E6EBF0' }}>
+                <Text category="label" appearance="hint" style={{ marginBottom: 8, color: isDarkMode ? colors.text_primary : '#666' }}>
                   Filtrar por materia:
                 </Text>
-                <Select
-                  selectedIndex={selectedMateriaIndex}
-                  value={selectDisplayValue}
-                  onSelect={(index) => setSelectedMateriaIndex(index as IndexPath)}
-                  placeholder="Seleccionar materia"
-                  style={{ borderRadius: 8 }}
-                >
-                  {[
-                    <SelectItem key="todas" title="Todas las materias" />,
-                    ...materiasUnicas.map((m: any) => (
-                      <SelectItem key={m.id} title={m.nombre} />
-                    ))
+                <CustomSelect
+                  items={[
+                    { key: 0, title: 'Todas las materias' },
+                    ...materiasUnicas.map((m: any, index: number) => ({
+                      key: index + 1,
+                      title: m.nombre
+                    }))
                   ]}
-                </Select>
+                  selectedKey={selectedMateriaIndex.row}
+                  onSelect={(key) => setSelectedMateriaIndex(new IndexPath(key as number))}
+                  placeholder="Seleccionar materia"
+                  isDarkMode={isDarkMode}
+                />
                 
                 {/* Contador de evaluaciones */}
                 <View style={{ marginTop: 12 }}>
@@ -2067,10 +2938,10 @@ function EvaluacionesTab({
             
             {/* Lista cronológica de evaluaciones */}
             {evaluacionesFiltradas.length === 0 ? (
-              <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
+              <Card disabled style={{ borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Text category="h6" style={{ marginBottom: 8, color: '#2196F3' }}>Sin evaluaciones</Text>
-                  <Text appearance="hint">
+                  <Text appearance="hint" style={{ color: isDarkMode ? colors.text_tertiary : '#666' }}>
                     {selectedMateria === 'todas' 
                       ? 'No hay evaluaciones registradas aún'
                       : 'No hay evaluaciones para esta materia'}
@@ -2088,18 +2959,31 @@ function EvaluacionesTab({
                 if (calificacion) {
                   if (calificacion.tipo === 'NUMERICA' && calificacion.valorNumerico != null) {
                     valorMostrar = calificacion.valorNumerico.toFixed(2);
-                    color = calificacion.valorNumerico >= 7 ? '#00BFA5' : calificacion.valorNumerico >= 4 ? '#FF9800' : '#F44336';
+                    color = calificacion.valorNumerico >= 7 ? '#764BA2' : calificacion.valorNumerico >= 4 ? '#FF9800' : '#F44336';
                   } else if (calificacion.tipo === 'CONCEPTUAL' && calificacion.valorConceptual) {
                     valorMostrar = calificacion.valorConceptual;
-                    color = calificacion.aprobado ? '#00BFA5' : '#F44336';
+                    color = calificacion.aprobado ? '#764BA2' : '#F44336';
                   }
                 }
                 
                 return (
-                  <Card key={`${evaluacion._id}-${idx}`} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
+                  <Card key={`${evaluacion._id}-${idx}`} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
+                    {/* Mostrar alumno si es "TODO" */}
+                    {!selectedAlumnoId && (
+                      <View style={{ marginBottom: 8 }}>
+                        <Text category="s2" style={{ color: colors.accent_primary, fontWeight: '600' }}>
+                          👤 {(() => {
+                            const alumnoDelEval = alumnos.find((a: any) => a.id === evaluacion.alumnoId);
+                            return alumnoDelEval ? `${alumnoDelEval.nombre} ${alumnoDelEval.apellido}` : 'Alumno desconocido';
+                          })()}
+                        </Text>
+                        <Divider style={{ marginTop: 6, marginBottom: 8, backgroundColor: isDarkMode ? colors.border_medium : '#E6EBF0' }} />
+                      </View>
+                    )}
+                    
                     {/* Fecha */}
                     <View style={{ marginBottom: 8 }}>
-                      <Text appearance="hint" category="c1">
+                      <Text appearance="hint" category="c1" style={{ color: isDarkMode ? colors.text_tertiary : '#666' }}>
                         {new Date(evaluacion.fecha).toLocaleDateString('es-AR', { 
                           weekday: 'long', 
                           year: 'numeric', 
@@ -2115,7 +2999,7 @@ function EvaluacionesTab({
                     </View>
                     
                     {/* Tema/Tipo */}
-                    <Text category="h7" style={{ fontWeight: 'bold',  marginBottom: 8 }}>
+                    <Text category="h7" style={{ fontWeight: 'bold', marginBottom: 8, color: isDarkMode ? colors.text_primary : '#1A1A2E' }}>
                       {evaluacion.tema || evaluacion.tipo}
                     </Text>
                     
@@ -2153,7 +3037,7 @@ function EvaluacionesTab({
                     
                     {/* Observaciones generales de la evaluación */}
                     {evaluacion.observaciones && (
-                      <Text appearance="hint" category="c1" style={{ marginTop: 4, fontStyle: 'italic' }}>
+                      <Text appearance="hint" category="c1" style={{ marginTop: 4, fontStyle: 'italic', color: isDarkMode ? colors.text_tertiary : '#666' }}>
                         {evaluacion.observaciones}
                       </Text>
                     )}
@@ -2184,12 +3068,16 @@ function EvaluacionesTab({
 function AsistenciasTab({ 
   alumnos, 
   selectedAlumnoId, 
-  setSelectedAlumnoId 
+  setSelectedAlumnoId,
+  isDarkMode = false
 }: { 
   alumnos: any[]; 
   selectedAlumnoId: string | null;
   setSelectedAlumnoId: (id: string | null) => void;
+  isDarkMode?: boolean;
 }) {
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [viewMode, setViewMode] = useState<'ultimos' | 'dia' | 'semana' | 'mes'>('ultimos');
@@ -2346,16 +3234,17 @@ function AsistenciasTab({
   }
 
   return (
-    <Layout style={{ flex: 1 }}>
+    <Layout style={{ flex: 1, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }}>
       {/* Filtro de alumnos */}
       <FiltroAlumnos 
         alumnos={alumnos}
         selectedAlumnoId={selectedAlumnoId}
         setSelectedAlumnoId={setSelectedAlumnoId}
+        isDarkMode={isDarkMode}
       />
       
       {/* Barra de búsqueda por fecha */}
-      <View style={{ padding: 16, backgroundColor: '#F8FAFB', borderBottomWidth: 1, borderBottomColor: '#E6EBF0' }}>
+      <View style={{ padding: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB', borderBottomWidth: 1, borderBottomColor: isDarkMode ? colors.border_medium : '#E6EBF0' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Button
             size="small"
@@ -2380,7 +3269,7 @@ function AsistenciasTab({
           )}
         </View>
         {viewMode !== 'ultimos' && (
-          <Text appearance="hint" category="c1" style={{ marginTop: 4, textAlign: 'center' }}>
+          <Text appearance="hint" category="c1" style={{ marginTop: 4, textAlign: 'center', color: isDarkMode ? colors.text_tertiary : '#666' }}>
             {viewMode === 'dia' ? 'Mostrando asistencias del día seleccionado' :
              viewMode === 'semana' ? 'Mostrando asistencias de la semana' :
              'Mostrando asistencias del mes'}
@@ -2389,13 +3278,13 @@ function AsistenciasTab({
       </View>
 
       <ScrollView 
-        style={{ flex: 1, padding: 16 }}
+        style={{ flex: 1, padding: 16, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#00BFA5']}
-            tintColor="#00BFA5"
+            colors={['#764BA2']}
+            tintColor="#764BA2"
           />
         }
       >
@@ -2409,20 +3298,20 @@ function AsistenciasTab({
                 style={{ 
                   marginBottom: 16, 
                   borderRadius: 16, 
-                  backgroundColor: '#F8FAFB',
+                  backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB',
                   borderWidth: 1,
-                  borderColor: '#E6EBF0'
+                  borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0'
                 }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                   <View style={{ flex: 1, gap: 8 }}>
-                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
-                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '70%', height: 16, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
                   </View>
-                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                  <View style={{ width: 60, height: 20, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 8 }} />
                 </View>
-                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
-                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                <View style={{ width: '100%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
               </Card>
             ))}
           </>
@@ -2439,26 +3328,26 @@ function AsistenciasTab({
             const mostrarEstadisticas = viewMode !== 'dia' || asistencias.length > 1;
 
             return (
-              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
+              <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
                 {/* Header con nombre del alumno */}
                 <View style={{ marginBottom: 12 }}>
-                  <Text category="h6" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                  <Text category="h6" style={{ color: '#764BA2', fontWeight: 'bold' }}>
                     {alumno.nombre} {alumno.apellido}
                   </Text>
                 </View>
 
-                <Divider style={{ marginBottom: 12 }} />
+                <Divider style={{ marginBottom: 12, backgroundColor: isDarkMode ? colors.border_medium : '#E6EBF0' }} />
 
                 {/* Estadísticas */}
                 {asistencias.length === 0 ? (
                   <View style={{ 
                     padding: 20, 
                     alignItems: 'center',
-                    backgroundColor: '#F8FAFB',
+                    backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB',
                     borderRadius: 10
                   }}>
-                    <Icon name="calendar-outline" style={{ width: 40, height: 40, marginBottom: 8 }} fill="#8F9BB3" />
-                    <Text appearance="hint" style={{ textAlign: 'center' }}>
+                    <Icon name="calendar-outline" style={{ width: 40, height: 40, marginBottom: 8 }} fill={isDarkMode ? colors.text_disabled : '#8F9BB3'} />
+                    <Text appearance="hint" style={{ textAlign: 'center', color: isDarkMode ? colors.text_tertiary : '#666' }}>
                       Sin registros de asistencia en el período seleccionado
                     </Text>
                   </View>
@@ -2468,31 +3357,31 @@ function AsistenciasTab({
                       <>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 }}>
                           <View style={{ alignItems: 'center' }}>
-                            <Text category="h4" style={{ color: '#00BFA5', fontWeight: 'bold' }}>
+                            <Text category="h6" style={{ color: '#764BA2', fontWeight: 'bold' }}>
                               {presente}
                             </Text>
                             <Text appearance="hint" category="c1">Presentes</Text>
                           </View>
                           <View style={{ alignItems: 'center' }}>
-                            <Text category="h4" style={{ color: '#FF6B6B', fontWeight: 'bold' }}>
+                            <Text category="h6" style={{ color: '#FF6B6B', fontWeight: 'bold' }}>
                               {ausente}
                             </Text>
                             <Text appearance="hint" category="c1">Ausentes</Text>
                           </View>
                           <View style={{ alignItems: 'center' }}>
-                            <Text category="h4" style={{ color: '#4A90E2', fontWeight: 'bold' }}>
+                            <Text category="h6" style={{ color: '#4A90E2', fontWeight: 'bold' }}>
                               {porcentaje}%
                             </Text>
                             <Text appearance="hint" category="c1">Asistencia</Text>
                           </View>
                         </View>
 
-                        <Divider style={{ marginBottom: 12 }} />
+                        <Divider style={{ marginBottom: 12, backgroundColor: isDarkMode ? colors.border_medium : '#E6EBF0' }} />
                       </>
                     )}
 
                     {/* Lista de asistencias */}
-                    <Text category="s1" style={{ marginBottom: 8, fontWeight: 'bold' }}>
+                    <Text category="s2" style={{ marginBottom: 8, fontWeight: 'bold', color: isDarkMode ? colors.text_primary : '#1A1A2E' }}>
                       {viewMode === 'dia' ? 'Registro del día' : 
                        viewMode === 'semana' ? 'Registros de la semana' :
                        viewMode === 'mes' ? 'Registros del mes' :
@@ -2508,11 +3397,13 @@ function AsistenciasTab({
                             paddingVertical: 8,
                             paddingHorizontal: 12,
                             marginBottom: 6,
-                            backgroundColor: asistencia.presente ? '#E8F8F5' : '#FFE8E8',
+                            backgroundColor: asistencia.presente 
+                              ? isDarkMode ? 'rgba(0, 191, 165, 0.15)' : '#E8F8F5'
+                              : isDarkMode ? 'rgba(255, 107, 107, 0.15)' : '#FFE8E8',
                             borderRadius: 8
                           }}
                         >
-                          <Text category="p2">
+                          <Text category="p2" style={{ color: isDarkMode ? colors.text_primary : '#1A1A2E' }}>
                             {(() => {
                               const fechaString = asistencia.fecha.split('T')[0];
                               const [year, month, day] = fechaString.split('-');
@@ -2529,13 +3420,13 @@ function AsistenciasTab({
                             <Icon 
                               name={asistencia.presente ? 'checkmark-circle-2' : 'close-circle'} 
                               style={{ width: 20, height: 20, marginRight: 6 }}
-                              fill={asistencia.presente ? '#00BFA5' : '#FF6B6B'}
+                              fill={asistencia.presente ? '#764BA2' : '#FF6B6B'}
                             />
                             <Text 
                               category="p2" 
                               style={{ 
                                 fontWeight: 'bold',
-                                color: asistencia.presente ? '#00BFA5' : '#FF6B6B'
+                                color: asistencia.presente ? '#764BA2' : '#FF6B6B'
                               }}
                             >
                               {asistencia.estado === 'TARDE' ? 'Tarde' : asistencia.presente ? 'Presente' : 'Ausente'}
@@ -2543,7 +3434,7 @@ function AsistenciasTab({
                           </View>
                         </View>
                         {asistencia.observaciones && (
-                          <Text appearance="hint" category="c1" style={{ marginTop: -2, marginBottom: 6, marginLeft: 12, fontStyle: 'italic' }}>
+                          <Text appearance="hint" category="c1" style={{ marginTop: -2, marginBottom: 6, marginLeft: 12, fontStyle: 'italic', color: isDarkMode ? colors.text_tertiary : '#666' }}>
                             {asistencia.observaciones}
                           </Text>
                         )}
@@ -2770,16 +3661,20 @@ function AsistenciasTab({
 function SeguimientoTab({ 
   alumnos, 
   selectedAlumnoId, 
-  setSelectedAlumnoId 
+  setSelectedAlumnoId,
+  isDarkMode = false
 }: { 
   alumnos: any[]; 
   selectedAlumnoId: string | null;
   setSelectedAlumnoId: (id: string | null) => void;
+  isDarkMode?: boolean;
 }) {
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  const [fechaDesde, setFechaDesde] = useState(new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)); // Últimos 10 días
+  const [fechaDesde, setFechaDesde] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)); // Últimos 7 días
   const [fechaHasta, setFechaHasta] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<'desde' | 'hasta'>('desde');
@@ -2798,13 +3693,12 @@ function SeguimientoTab({
   const { data, loading, refetch } = useQuery(GET_SEGUIMIENTO_DIARIO, {
     variables: {
       alumnoId: selectedAlumnoId,
-      fechaInicio: fechaDesde.toISOString(),
-      fechaFin: fechaHasta.toISOString()
+      limit: 7
     },
     skip: shouldSkip
   });
   
-  const seguimientos = data?.seguimientosDiariosPorAlumno || [];
+  const seguimientos = data?.seguimientosDiariosPorAlumnoTutor || [];
   
   // DEBUG: Ver datos de seguimiento
   console.log('🔍 DEBUG Seguimiento - Variables:', {
@@ -2836,30 +3730,31 @@ function SeguimientoTab({
   }
   
   return (
-    <Layout style={{ flex: 1 }} level="2">
+    <Layout style={{ flex: 1, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }} level="2">
       {/* Selector de alumno MATERNAL */}
       <FiltroAlumnos 
         alumnos={alumnosMaternalOnly}
         selectedAlumnoId={selectedAlumnoId}
         setSelectedAlumnoId={setSelectedAlumnoId}
+        isDarkMode={isDarkMode}
       />
       
       {/* Indicador de nivel */}
-      <View style={{ backgroundColor: '#E6F7F4', padding: 8 }}>
-        <Text appearance="hint" category="c1" style={{ textAlign: 'center', color: '#00BFA5' }}>
+      <View style={{ backgroundColor: isDarkMode ? colors.bg_secondary : '#F0E6F7', padding: 8 }}>
+        <Text appearance="hint" category="c1" style={{ textAlign: 'center', color: isDarkMode ? colors.text_tertiary : '#764BA2' }}>
           Nivel Maternal - Seguimiento Diario
         </Text>
       </View>
       
       <ScrollView 
-        style={{ flex: 1 }} 
-        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+        style={{ flex: 1, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }} 
+        contentContainerStyle={{ padding: 16, paddingBottom: 100, backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF' }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#00BFA5']}
-            tintColor="#00BFA5"
+            colors={['#764BA2']}
+            tintColor="#764BA2"
           />
         }
       >
@@ -2873,27 +3768,27 @@ function SeguimientoTab({
                 style={{ 
                   marginBottom: 16, 
                   borderRadius: 16, 
-                  backgroundColor: '#F8FAFB',
+                  backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB',
                   borderWidth: 1,
-                  borderColor: '#E6EBF0'
+                  borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0'
                 }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                   <View style={{ flex: 1, gap: 8 }}>
-                    <View style={{ width: '70%', height: 16, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
-                    <View style={{ width: '40%', height: 12, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '70%', height: 16, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
+                    <View style={{ width: '40%', height: 12, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
                   </View>
-                  <View style={{ width: 60, height: 20, backgroundColor: '#E6EBF0', borderRadius: 8 }} />
+                  <View style={{ width: 60, height: 20, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 8 }} />
                 </View>
-                <View style={{ width: '100%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
-                <View style={{ width: '85%', height: 14, backgroundColor: '#E6EBF0', borderRadius: 4 }} />
+                <View style={{ width: '100%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4, marginBottom: 6 }} />
+                <View style={{ width: '85%', height: 14, backgroundColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderRadius: 4 }} />
               </Card>
             ))}
           </>
         ) : seguimientos.length === 0 ? (
-          <Card disabled style={{ borderRadius: 16, backgroundColor: '#F8FAFB', borderWidth: 1, borderColor: '#E6EBF0' }}>
+          <Card disabled style={{ borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F8FAFB', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}>
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <Text category="h6" style={{ marginBottom: 8, color: '#00BFA5' }}>Sin seguimiento registrado</Text>
+              <Text category="h6" style={{ marginBottom: 8, color: '#764BA2' }}>Sin seguimiento registrado</Text>
               <Text appearance="hint">No hay registros de seguimiento diario en este período</Text>
             </View>
           </Card>
@@ -2906,13 +3801,13 @@ function SeguimientoTab({
               return (
                 <Card 
                   key={seguimiento.id} 
-                  style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0', borderLeftWidth: 4, borderLeftColor: '#00BFA5' }}
+                  style={{ marginBottom: 16, borderRadius: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0', borderLeftWidth: 4, borderLeftColor: '#764BA2' }}
                   onPress={() => setExpandedDays(prev => ({ ...prev, [seguimiento.id]: !prev[seguimiento.id] }))}
                 >
                   {/* Header compacto - siempre visible */}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View style={{ flex: 1 }}>
-                      <Text category="s1" style={{ color: '#2E3A59', marginBottom: 4, fontSize: 14 }}>
+                      <Text category="s1" style={{ color: isDarkMode ? colors.text_primary : '#3D3D5C', marginBottom: 4, fontSize: 14 }}>
                         {new Date(seguimiento.fecha).toLocaleDateString('es-AR', {
                           weekday: 'long',
                           day: 'numeric',
@@ -2924,20 +3819,26 @@ function SeguimientoTab({
                         <View style={{ 
                           paddingHorizontal: 10, 
                           paddingVertical: 4, 
-                          backgroundColor: 
+                          backgroundColor: isDarkMode ? (
+                            seguimiento.estadoDelDia === 'no-tan-bueno' ? '#5C2B2B' :
+                            seguimiento.estadoDelDia === 'bueno' ? '#1F4D3D' :
+                            seguimiento.estadoDelDia === 'muy-bueno' ? '#0F4D3D' :
+                            colors.bg_tertiary
+                          ) : (
                             seguimiento.estadoDelDia === 'no-tan-bueno' ? '#FEE2E2' :
-                            seguimiento.estadoDelDia === 'bueno' ? '#D1FAE5' :
-                            seguimiento.estadoDelDia === 'muy-bueno' ? '#A7F3D0' :
-                            '#E6F7F4',
+                            seguimiento.estadoDelDia === 'bueno' ? '#E6D9F0' :
+                            seguimiento.estadoDelDia === 'muy-bueno' ? '#D4B3E6' :
+                            '#F0E6F7'
+                          ),
                           borderRadius: 6,
                           alignSelf: 'flex-start'
                         }}>
                           <Text category="c2" style={{ 
                             color: 
-                              seguimiento.estadoDelDia === 'no-tan-bueno' ? '#DC2626' :
-                              seguimiento.estadoDelDia === 'bueno' ? '#059669' :
-                              seguimiento.estadoDelDia === 'muy-bueno' ? '#047857' :
-                              '#00BFA5',
+                              seguimiento.estadoDelDia === 'no-tan-bueno' ? '#FF6B6B' :
+                              seguimiento.estadoDelDia === 'bueno' ? '#764BA2' :
+                              seguimiento.estadoDelDia === 'muy-bueno' ? '#764BA2' :
+                              '#764BA2',
                             fontSize: 11
                           }}>
                             {seguimiento.estadoDelDia.replace(/-/g, ' ')}
@@ -2948,7 +3849,7 @@ function SeguimientoTab({
                     <Icon 
                       name={isExpanded ? 'chevron-up-outline' : 'chevron-down-outline'} 
                       style={{ width: 24, height: 24 }} 
-                      fill="#8F9BB3" 
+                      fill={isDarkMode ? colors.text_tertiary : '#8F9BB3'}
                     />
                   </View>
 
@@ -2958,16 +3859,16 @@ function SeguimientoTab({
                       <Divider style={{ marginBottom: 16 }} />
                       
                       {/* Alimentación */}
-                      <View style={{ marginBottom: 16, backgroundColor: '#F8FAFB', padding: 12, borderRadius: 8 }}>
-                        <Text category="s1" style={{ marginBottom: 10, color: '#2E3A59' }}>
+                      <View style={{ marginBottom: 16, backgroundColor: isDarkMode ? colors.bg_tertiary : '#F8FAFB', padding: 12, borderRadius: 8 }}>
+                        <Text category="s1" style={{ marginBottom: 10, color: isDarkMode ? colors.text_primary : '#3D3D5C' }}>
                           Alimentación
                         </Text>
                         <View style={{ gap: 6 }}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Desayuno:</Text>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Desayuno:</Text>
                             <Text category="p2" style={{ 
-                              color: seguimiento.alimentacion?.desayuno === 'MUY_BIEN' ? '#10B981' :
-                                    seguimiento.alimentacion?.desayuno === 'BIEN' ? '#00BFA5' :
+                              color: seguimiento.alimentacion?.desayuno === 'MUY_BIEN' ? '#764BA2' :
+                                    seguimiento.alimentacion?.desayuno === 'BIEN' ? '#764BA2' :
                                     seguimiento.alimentacion?.desayuno === 'POCO' ? '#FFB020' : '#8F9BB3'
                             }}>
                               {seguimiento.alimentacion?.desayuno === 'MUY_BIEN' ? 'Muy bien' :
@@ -2976,10 +3877,10 @@ function SeguimientoTab({
                             </Text>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Almuerzo:</Text>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Almuerzo:</Text>
                             <Text category="p2" style={{ 
-                              color: seguimiento.alimentacion?.almuerzo === 'MUY_BIEN' ? '#10B981' :
-                                    seguimiento.alimentacion?.almuerzo === 'BIEN' ? '#00BFA5' :
+                              color: seguimiento.alimentacion?.almuerzo === 'MUY_BIEN' ? '#764BA2' :
+                                    seguimiento.alimentacion?.almuerzo === 'BIEN' ? '#764BA2' :
                                     seguimiento.alimentacion?.almuerzo === 'POCO' ? '#FFB020' : '#8F9BB3'
                             }}>
                               {seguimiento.alimentacion?.almuerzo === 'MUY_BIEN' ? 'Muy bien' :
@@ -2988,10 +3889,10 @@ function SeguimientoTab({
                             </Text>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Merienda:</Text>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Merienda:</Text>
                             <Text category="p2" style={{ 
-                              color: seguimiento.alimentacion?.merienda === 'MUY_BIEN' ? '#10B981' :
-                                    seguimiento.alimentacion?.merienda === 'BIEN' ? '#00BFA5' :
+                              color: seguimiento.alimentacion?.merienda === 'MUY_BIEN' ? '#764BA2' :
+                                    seguimiento.alimentacion?.merienda === 'BIEN' ? '#764BA2' :
                                     seguimiento.alimentacion?.merienda === 'POCO' ? '#FFB020' : '#8F9BB3'
                             }}>
                               {seguimiento.alimentacion?.merienda === 'MUY_BIEN' ? 'Muy bien' :
@@ -3003,50 +3904,50 @@ function SeguimientoTab({
                       </View>
                       
                       {/* Descanso */}
-                      <View style={{ marginBottom: 16, backgroundColor: '#F8FAFB', padding: 12, borderRadius: 8 }}>
-                        <Text category="s1" style={{ marginBottom: 10, color: '#2E3A59' }}>
+                      <View style={{ marginBottom: 16, backgroundColor: isDarkMode ? colors.bg_tertiary : '#F8FAFB', padding: 12, borderRadius: 8 }}>
+                        <Text category="s1" style={{ marginBottom: 10, color: isDarkMode ? colors.text_primary : '#3D3D5C' }}>
                           Descanso
                         </Text>
                         <View style={{ gap: 6 }}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Llegó dormido:</Text>
-                            <Text category="p2" style={{ color: seguimiento.descanso?.llegoDormido ? '#00BFA5' : '#8F9BB3' }}>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Llegó dormido:</Text>
+                            <Text category="p2" style={{ color: seguimiento.descanso?.llegoDormido ? '#764BA2' : '#8F9BB3' }}>
                               {seguimiento.descanso?.llegoDormido ? 'Sí' : 'No'}
                             </Text>
                           </View>
                           {seguimiento.descanso?.llegoDormido && seguimiento.descanso?.horaDespertar && (
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 16, backgroundColor: '#FFF7ED', padding: 8, borderRadius: 6 }}>
-                              <Text category="p2" style={{ color: '#92400E', fontStyle: 'italic' }}>Se despertó a las:</Text>
-                              <Text category="p2" style={{ color: '#92400E', fontWeight: 'bold' }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFF7ED', padding: 8, borderRadius: 6 }}>
+                              <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#92400E', fontStyle: 'italic' }}>Se despertó a las:</Text>
+                              <Text category="p2" style={{ color: isDarkMode ? colors.text_primary : '#92400E', fontWeight: 'bold' }}>
                                 {seguimiento.descanso.horaDespertar}
                               </Text>
                             </View>
                           )}
                           
                           {seguimiento.descanso?.llegoDormido && (
-                            <View style={{ height: 1, backgroundColor: '#E5E7EB', marginVertical: 4 }} />
+                            <View style={{ height: 1, backgroundColor: isDarkMode ? colors.border_subtle : '#E5E7EB', marginVertical: 4 }} />
                           )}
                           
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Durmió siesta:</Text>
-                            <Text category="p2" style={{ color: seguimiento.descanso?.durmio ? '#00BFA5' : '#8F9BB3' }}>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Durmió siesta:</Text>
+                            <Text category="p2" style={{ color: seguimiento.descanso?.durmio ? '#764BA2' : '#8F9BB3' }}>
                               {seguimiento.descanso?.durmio ? 'Sí' : 'No'}
                             </Text>
                           </View>
                           {seguimiento.descanso?.durmio && (seguimiento.descanso?.horaDormir || seguimiento.descanso?.horaDespertar) && (
-                            <View style={{ paddingLeft: 16, backgroundColor: '#EFF6FF', padding: 8, borderRadius: 6 }}>
+                            <View style={{ paddingLeft: 16, backgroundColor: isDarkMode ? colors.bg_secondary : '#F0E6F7', padding: 8, borderRadius: 6 }}>
                               {seguimiento.descanso?.horaDormir && (
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                  <Text category="p2" style={{ color: '#1E40AF', fontSize: 12 }}>Desde:</Text>
-                                  <Text category="p2" style={{ color: '#1E40AF', fontWeight: 'bold' }}>
+                                  <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#1E40AF', fontSize: 12 }}>Desde:</Text>
+                                  <Text category="p2" style={{ color: isDarkMode ? colors.text_primary : '#1E40AF', fontWeight: 'bold' }}>
                                     {seguimiento.descanso.horaDormir}
                                   </Text>
                                 </View>
                               )}
                               {seguimiento.descanso?.horaDespertar && (
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Text category="p2" style={{ color: '#1E40AF', fontSize: 12 }}>Hasta:</Text>
-                                  <Text category="p2" style={{ color: '#1E40AF', fontWeight: 'bold' }}>
+                                  <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#1E40AF', fontSize: 12 }}>Hasta:</Text>
+                                  <Text category="p2" style={{ color: isDarkMode ? colors.text_primary : '#1E40AF', fontWeight: 'bold' }}>
                                     {seguimiento.descanso.horaDespertar}
                                   </Text>
                                 </View>
@@ -3057,20 +3958,20 @@ function SeguimientoTab({
                       </View>
                       
                       {/* Cambios */}
-                      <View style={{ marginBottom: seguimiento.notasDelDia ? 16 : 0, backgroundColor: '#F8FAFB', padding: 12, borderRadius: 8 }}>
-                        <Text category="s1" style={{ marginBottom: 10, color: '#2E3A59' }}>
+                      <View style={{ marginBottom: seguimiento.notasDelDia ? 16 : 0, backgroundColor: isDarkMode ? colors.bg_tertiary : '#F8FAFB', padding: 12, borderRadius: 8 }}>
+                        <Text category="s1" style={{ marginBottom: 10, color: isDarkMode ? colors.text_primary : '#3D3D5C' }}>
                           Cambios
                         </Text>
                         <View style={{ gap: 6 }}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Caca:</Text>
-                            <Text category="p2" style={{ color: seguimiento.cambios?.caca ? '#00BFA5' : '#8F9BB3' }}>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Caca:</Text>
+                            <Text category="p2" style={{ color: seguimiento.cambios?.caca ? '#764BA2' : '#8F9BB3' }}>
                               {seguimiento.cambios?.caca ? 'Sí' : 'No'}
                             </Text>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text category="p2" style={{ color: '#6B7280' }}>Pis:</Text>
-                            <Text category="p2" style={{ color: seguimiento.cambios?.pis ? '#00BFA5' : '#8F9BB3' }}>
+                            <Text category="p2" style={{ color: isDarkMode ? colors.text_tertiary : '#6B7280' }}>Pis:</Text>
+                            <Text category="p2" style={{ color: seguimiento.cambios?.pis ? '#764BA2' : '#8F9BB3' }}>
                               {seguimiento.cambios?.pis ? 'Sí' : 'No'}
                             </Text>
                           </View>
@@ -3100,20 +4001,20 @@ function SeguimientoTab({
         
         {/* Filtro de fechas (Desplegable) */}
         <Card 
-          style={{ marginTop: 8, marginBottom: 16, borderRadius: 12, backgroundColor: '#FFFFFF' }}
+          style={{ marginTop: 8, marginBottom: 16, borderRadius: 12, backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF', borderWidth: 1, borderColor: isDarkMode ? colors.border_subtle : '#E6EBF0' }}
           onPress={() => setShowFilterPanel(!showFilterPanel)}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Icon name="funnel-outline" style={{ width: 20, height: 20 }} fill="#00BFA5" />
-              <Text category="s1" style={{ color: '#2E3A59' }}>
+              <Icon name="funnel-outline" style={{ width: 20, height: 20 }} fill="#764BA2" />
+              <Text category="s1" style={{ color: isDarkMode ? colors.text_primary : '#3D3D5C' }}>
                 Filtrar fechas
               </Text>
             </View>
             <Icon 
               name={showFilterPanel ? 'chevron-up-outline' : 'chevron-down-outline'} 
               style={{ width: 24, height: 24 }} 
-              fill="#8F9BB3" 
+              fill={isDarkMode ? colors.text_tertiary : '#8F9BB3'}
             />
           </View>
           
@@ -3156,16 +4057,16 @@ function SeguimientoTab({
                 </Button>
               </View>
 
-              <Divider />
+              <Divider style={{ backgroundColor: isDarkMode ? colors.border_subtle : undefined }} />
 
               {/* Fechas personalizadas */}
-              <Text category="c1" appearance="hint" style={{ marginTop: 4 }}>
+              <Text category="c1" appearance="hint" style={{ marginTop: 4, color: isDarkMode ? colors.text_tertiary : undefined }}>
                 Rango personalizado:
               </Text>
               
               {showDatePicker && (
                 <View style={{ marginBottom: 12 }}>
-                  <Text category="c1" style={{ marginBottom: 8, color: '#00BFA5', fontWeight: 'bold' }}>
+                  <Text category="c1" style={{ marginBottom: 8, color: '#764BA2', fontWeight: 'bold' }}>
                     {datePickerMode === 'desde' ? 'Selecciona fecha desde:' : 'Selecciona fecha hasta:'}
                   </Text>
                   <Datepicker
@@ -3227,9 +4128,12 @@ function SeguimientoTab({
 }
 
 // ⚙️ CONFIGURACIONES
-function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
+function ConfiguracionesTab({ onLogout, isDarkMode = false }: { onLogout: () => void; isDarkMode?: boolean }) {
   const [editingTutor, setEditingTutor] = useState(false);
   const [editingAlumnoId, setEditingAlumnoId] = useState<string | null>(null);
+  
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
   
   const [tutorNombre, setTutorNombre] = useState('');
   const [tutorApellido, setTutorApellido] = useState('');
@@ -3335,7 +4239,7 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
         {/* Sección: Datos del Tutor */}
         <Card style={{ marginBottom: 20, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Text category="h6" style={{ color: '#2E3A59' }}>Mis Datos</Text>
+            <Text category="h6" style={{ color: '#3D3D5C' }}>Mis Datos</Text>
             {!editingTutor && (
               <Button
                 size="small"
@@ -3424,11 +4328,11 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
         </Card>
         
         {/* Sección: Alumnos */}
-        <Text category="h6" style={{ marginBottom: 12, color: '#2E3A59' }}>Mis Hijos</Text>
+        <Text category="h6" style={{ marginBottom: 12, color: '#3D3D5C' }}>Mis Hijos</Text>
         {alumnos.map((alumno: any) => (
           <Card key={alumno.id} style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF0' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text category="s1" style={{ color: '#2E3A59' }}>
+              <Text category="s1" style={{ color: '#3D3D5C' }}>
                 {alumno.apellido} {alumno.nombre}
               </Text>
               {editingAlumnoId !== alumno.id && (
@@ -3508,7 +4412,7 @@ function ConfiguracionesTab({ onLogout }: { onLogout: () => void }) {
               <>
                 <View style={{ marginBottom: 12 }}>
                   <Text category="c1" appearance="hint" style={{ marginBottom: 4 }}>Fecha de Nacimiento:</Text>
-                  <Text category="s2" style={{ color: '#2E3A59' }}>
+                  <Text category="s2" style={{ color: '#3D3D5C' }}>
                     {alumno.fechaNacimiento ? new Date(alumno.fechaNacimiento).toLocaleDateString('es-AR', { 
                       day: '2-digit', 
                       month: 'long', 
@@ -3669,7 +4573,7 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
                 <View
                   style={{
                     height: 200,
-                    backgroundColor: '#00BFA5',
+                    backgroundColor: '#764BA2',
                     justifyContent: 'center',
                     alignItems: 'center',
                     position: 'relative',
@@ -3708,7 +4612,7 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
                 <Text
                   category="h6"
                   style={{
-                    color: '#2E3A59',
+                    color: '#3D3D5C',
                     marginBottom: 8,
                     fontWeight: '700',
                   }}
@@ -3788,7 +4692,7 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
                 width: index === currentIndex ? 28 : 8,
                 height: 8,
                 borderRadius: 4,
-                backgroundColor: index === currentIndex ? '#00BFA5' : '#CBD5E0',
+                backgroundColor: index === currentIndex ? '#764BA2' : '#CBD5E0',
               }}
             />
           ))}
@@ -3798,17 +4702,83 @@ function CarruselPosteos({ mensajesGenerales }: { mensajesGenerales: any[] }) {
   );
 }
 
+// 🔄 FUNCIÓN AUXILIAR: Mapear cualquier tipo de post al formato PostCard
+function mapPostToPostCardProps(post: any): any {
+  const tipo = post.tipo || 'MENSAJE';
+  
+  const baseProps = {
+    tipo,
+    fecha: post.fecha || post.publicadoEn || post.creadoEn,
+  };
+
+  switch (tipo) {
+    case 'MENSAJE':
+      return {
+        ...baseProps,
+        titulo: post.titulo,
+        contenido: post.contenido,
+        autorNombre: post.autorNombre,
+        imagenes: post.imagenes,
+        imagen: post.imagen,
+        alumnoNombre: post.alumnoNombre,
+        alumnoApellido: post.alumnoApellido,
+      };
+
+    case 'ASISTENCIA':
+      const presente = post.estado === 'PRESENTE' || post.estado === 'TARDE';
+      return {
+        ...baseProps,
+        titulo: `Asistencia: ${post.estado}`,
+        contenido: `Estado: ${post.estado}${post.observaciones ? ` - ${post.observaciones}` : ''}`,
+        autorNombre: 'Sistema',
+        alumnoNombre: post.alumnoNombre,
+        alumnoApellido: post.alumnoApellido,
+      };
+
+    case 'EVALUACION':
+      const nota = post.nota || 'Sin calificar';
+      return {
+        ...baseProps,
+        titulo: `Evaluación: ${post.materia || 'Sin materia'}`,
+        contenido: `Nota: ${nota}${post.descripcion ? ` - ${post.descripcion}` : ''}`,
+        autorNombre: 'Sistema',
+        alumnoNombre: post.alumnoNombre,
+        alumnoApellido: post.alumnoApellido,
+      };
+
+    case 'SEGUIMIENTO':
+      return {
+        ...baseProps,
+        titulo: 'Seguimiento del día',
+        contenido: post.contenido || 'Sin notas',
+        autorNombre: 'Sistema',
+        alumnoNombre: post.alumnoNombre,
+        alumnoApellido: post.alumnoApellido,
+      };
+
+    default:
+      return {
+        ...baseProps,
+        titulo: 'Post',
+        contenido: post.contenido || 'Sin contenido',
+        autorNombre: 'Sistema',
+      };
+  }
+}
+
 // 🏠 DASHBOARD TAB - Feed tipo Instagram/Facebook
 function DashboardTab({ 
   alumnos, 
   selectedAlumnoId, 
   setSelectedAlumnoId,
-  setActiveTab
+  setActiveTab,
+  isDarkMode = false
 }: { 
   alumnos: any[]; 
   selectedAlumnoId: string | null;
   setSelectedAlumnoId: (id: string | null) => void;
   setActiveTab: (tab: string) => void;
+  isDarkMode?: boolean;
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({});
@@ -3816,11 +4786,28 @@ function DashboardTab({
   const [mostrarModalFiltros, setMostrarModalFiltros] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null); // null = hoy
   const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  // Obtener colores según modo oscuro
+  const colors = getColors(isDarkMode);
   const [tempDate, setTempDate] = useState<Date>(new Date());
   
-  const { data: mensajesData, refetch: refetchMensajes } = useQuery(GET_MENSAJES_TUTOR);
+  const { data: mensajesData, loading: mensajesLoading, refetch: refetchMensajes } = useQuery(GET_MENSAJES_TUTOR);
   const mensajes = mensajesData?.mensajesTutor || [];
   const [marcarLeido] = useMutation(MARCAR_MENSAJE_LEIDO);
+  
+  // Handler para navegación desde notificaciones
+  const handleNavigateToSection = (section: 'Mensajes' | 'Calificaciones' | 'Asistencia' | 'Seguimientos' | 'Evaluaciones' | 'Asistencias') => {
+    console.log('🔔 [Notificación] Navegando a:', section);
+    const tabMap: Record<string, string> = {
+      'Mensajes': 'mensajes',
+      'Calificaciones': 'evaluaciones',
+      'Asistencia': 'asistencias',
+      'Asistencias': 'asistencias',
+      'Seguimientos': 'seguimiento',
+      'Evaluaciones': 'evaluaciones'
+    };
+    setActiveTab(tabMap[section] || section);
+  };
   
   // Debugging: Loguear errores de query
   useEffect(() => {
@@ -3890,14 +4877,17 @@ function DashboardTab({
   });
     
   const { data: asistenciasData, loading: loadingAsistencias } = useQuery(GET_ASISTENCIAS, {
-    variables: { desde: fechaDesde, hasta: hoy }
+    variables: { desde: fechaDesde, hasta: hoy },
+    skip: !fechaDesde || !hoy  // No ejecutar si las fechas no están listas
   });
   
   // Calificaciones recientes (últimos 30 días desde la fecha seleccionada para ver más datos)
   const fechaLimite = new Date(fechaBaseFin.getTime() - 30 * 24 * 60 * 60 * 1000);
   
   // Query de calificaciones - NULL para obtener todos los alumnos del tutor
-  const { data: calificacionesData, loading: loadingCalificaciones } = useQuery(GET_CALIFICACIONES);
+  const { data: calificacionesData, loading: loadingCalificaciones } = useQuery(GET_CALIFICACIONES, {
+    skip: false  // Siempre ejecutar
+  });
   
   // Seguimiento - Por ahora solo obtenemos los seguimientos consultando individualmente en el frontend
   // Esto requeriría hacer múltiples queries o modificar el backend para aceptar múltiples alumnos
@@ -3908,8 +4898,7 @@ function DashboardTab({
   const { data: seguimientosDataRaw, loading: loadingSeguimientos } = useQuery(GET_SEGUIMIENTO_DIARIO, {
     variables: {
       alumnoId: primerMaternalId,
-      fechaInicio: fechaDesde,
-      fechaFin: hoy
+      limit: 7
     },
     skip: !primerMaternalId
   });
@@ -3917,7 +4906,7 @@ function DashboardTab({
   // Adaptar formato de seguimientos
   const seguimientosData = React.useMemo(() => {
     return {
-      seguimientosDiariosPorAlumno: seguimientosDataRaw?.seguimientosDiariosPorAlumno || []
+      seguimientosDiariosPorAlumnoTutor: seguimientosDataRaw?.seguimientosDiariosPorAlumnoTutor || []
     };
   }, [seguimientosDataRaw]);
   
@@ -3929,17 +4918,34 @@ function DashboardTab({
     console.log('Fecha base inicio:', fechaBaseInicio.toISOString().split('T')[0]);
     console.log('Fecha base fin:', fechaBaseFin.toISOString().split('T')[0]);
     console.log('Fecha seleccionada:', selectedDate?.toISOString().split('T')[0] || 'ninguna (últimos 3 días)');
+    console.log('Alumnos disponibles:', alumnos.length, alumnos.map((a: any) => `${a.nombre}(${a.id})`).join(', '));
     console.log('Mensajes:', mensajes.length);
-    console.log('Asistencias data:', asistenciasData?.asistenciasTutor?.length || 0, 'registros');
+    
+    // Debug asistencias
+    console.log('🏫 ASISTENCIAS DATA:', {
+      hasData: !!asistenciasData,
+      loading: loadingAsistencias,
+      asistenciasTutorLength: asistenciasData?.asistenciasTutor?.length || 0,
+      firstAsistencia: asistenciasData?.asistenciasTutor?.[0],
+      totalRegistros: asistenciasData?.asistenciasTutor?.reduce((sum: number, a: any) => sum + (a.registros?.length || 0), 0) || 0,
+      fullData: asistenciasData
+    });
+    
     console.log('Fecha límite evaluaciones:', fechaLimite.toISOString().split('T')[0]);
     console.log('Rango asistencias/seguimiento:', fechaDesde, 'a', hoy);
-    console.log('Calificaciones data:', {
+    
+    // Debug calificaciones
+    console.log('📊 CALIFICACIONES DATA:', {
       hasData: !!calificacionesData,
-      materias: calificacionesData?.calificacionesTutor?.length || 0
+      loading: loadingCalificaciones,
+      materias: calificacionesData?.calificacionesTutor?.length || 0,
+      firstMateria: calificacionesData?.calificacionesTutor?.[0],
+      fullData: calificacionesData
     });
+    
     console.log('Seguimientos data:', { 
       hasData: !!seguimientosData,
-      registros: seguimientosData?.seguimientosDiariosPorAlumno?.length || 0
+      registros: seguimientosData?.seguimientosDiariosPorAlumnoTutor?.length || 0
     });
     
     // 1. Mensajes recientes (del rango: últimos 3 días hábiles o fecha seleccionada + 7 días)
@@ -3955,28 +4961,44 @@ function DashboardTab({
     console.log('📧 Mensajes Recientes:', mensajesRecientes.map(m => ({
       id: m.id,
       titulo: m.titulo,
+      alcance: m.alcance,
+      tipo: m.tipo,
       destinatarioIds: m.destinatarioIds,
       tieneDestinatarios: m.destinatarioIds && m.destinatarioIds.length > 0
     })));
     
     mensajesRecientes.forEach((mensaje: any) => {
-      // Si el mensaje tiene destinatarioIds, crear un post por cada alumno destinatario
+      // Si el mensaje tiene destinatarioIds (para alumnos específicos o divisiones/grados)
       if (mensaje.destinatarioIds && mensaje.destinatarioIds.length > 0) {
-        mensaje.destinatarioIds.forEach((destinatarioId: string) => {
-          const alumno = alumnos.find((a: any) => a.id === destinatarioId);
-          if (alumno) {
-            posts.push({
-              id: `mensaje-${mensaje.id}-${alumno.id}`,
-              tipo: 'MENSAJE',
-              fecha: mensaje.publicadoEn || mensaje.creadoEn,
-              contenido: mensaje,
-              alumno: alumno,
-              prioridad: mensaje.leido ? 2 : 3
-            });
-          }
-        });
+        // Para mensajes de alumno individual: crear un post por cada alumno
+        if (mensaje.alcance === 'ALUMNO') {
+          mensaje.destinatarioIds.forEach((destinatarioId: string) => {
+            const alumno = alumnos.find((a: any) => a.id === destinatarioId);
+            if (alumno) {
+              posts.push({
+                id: `mensaje-${mensaje.id}-${alumno.id}`,
+                tipo: 'MENSAJE',
+                fecha: mensaje.publicadoEn || mensaje.creadoEn,
+                contenido: mensaje,
+                alumno: alumno,
+                prioridad: mensaje.leido ? 2 : 3
+              });
+            }
+          });
+        } else {
+          // Para mensajes de grado/división: crear un único post (sin alumno específico)
+          console.log(`✅ Mensaje de ${mensaje.alcance} detectado:`, mensaje.titulo);
+          posts.push({
+            id: `mensaje-${mensaje.id}`,
+            tipo: 'MENSAJE',
+            fecha: mensaje.publicadoEn || mensaje.creadoEn,
+            contenido: mensaje,
+            alumno: null,
+            prioridad: mensaje.leido ? 2 : 3
+          });
+        }
       } else {
-        // Mensaje general (sin destinatarios específicos)
+        // Mensaje general (COLEGIO - sin destinatarios específicos)
         console.log('✅ Mensaje general detectado:', mensaje.titulo);
         posts.push({
           id: `mensaje-${mensaje.id}`,
@@ -3993,9 +5015,12 @@ function DashboardTab({
     
     // 2. Asistencia de hoy
     if (asistenciasData?.asistenciasTutor) {
-      asistenciasData.asistenciasTutor.forEach((asistencia: any) => {
-        asistencia.registros.forEach((registro: any) => {
+      console.log('🔍 Procesando asistencias, total días:', asistenciasData.asistenciasTutor.length);
+      asistenciasData.asistenciasTutor.forEach((asistencia: any, idxAsis: number) => {
+        console.log(`  Día ${idxAsis}:`, {fecha: asistencia.fecha, registros: asistencia.registros?.length || 0});
+        asistencia.registros.forEach((registro: any, idxReg: number) => {
           const alumno = alumnos.find((a: any) => a.id === registro.alumnoId);
+          console.log(`    Registro ${idxReg}:`, {alumnoId: registro.alumnoId, encontrado: !!alumno, estado: registro.estado});
           if (alumno) {
             posts.push({
               id: `asistencia-${asistencia.id}-${registro.alumnoId}`,
@@ -4008,10 +5033,14 @@ function DashboardTab({
           }
         });
       });
+      console.log('✅ Asistencias agregadas al feed:', posts.filter((p: any) => p.tipo === 'ASISTENCIA').length);
+    } else {
+      console.log('❌ NO HAY ASISTENCIAS DATA - asistenciasData:', asistenciasData);
     }
     
     // 3. Evaluaciones recientes - solo para todos los alumnos con data disponible
     if (calificacionesData?.calificacionesTutor) {
+      console.log('🔍 Procesando evaluaciones, total materias:', calificacionesData.calificacionesTutor.length);
       alumnos.forEach((alumno) => {
         calificacionesData.calificacionesTutor.forEach((materia: any) => {
           materia.evaluaciones?.forEach((evaluacion: any) => {
@@ -4020,6 +5049,7 @@ function DashboardTab({
               // Buscar la nota específica de este alumno
               const notaAlumno = evaluacion.notas?.find((n: any) => n.alumnoId === alumno.id);
               if (notaAlumno) {
+                console.log(`  ✓ Eval agregada: ${materia.nombre} - ${alumno.nombre}`);
                 posts.push({
                   id: `evaluacion-${evaluacion._id}-${alumno.id}`,
                   tipo: 'EVALUACION',
@@ -4037,11 +5067,14 @@ function DashboardTab({
           });
         });
       });
+      console.log('✅ Evaluaciones agregadas al feed:', posts.filter((p: any) => p.tipo === 'EVALUACION').length);
+    } else {
+      console.log('❌ NO HAY CALIFICACIONES DATA - calificacionesData:', calificacionesData);
     }
     
     // 4. Seguimiento diario (si aplica)
-    if (seguimientosData?.seguimientosDiariosPorAlumno && seguimientosData.seguimientosDiariosPorAlumno.length > 0) {
-      seguimientosData.seguimientosDiariosPorAlumno.forEach((seg: any) => {
+    if (seguimientosData?.seguimientosDiariosPorAlumnoTutor && seguimientosData.seguimientosDiariosPorAlumnoTutor.length > 0) {
+      seguimientosData.seguimientosDiariosPorAlumnoTutor.forEach((seg: any) => {
         const alumno = alumnos.find((a: any) => a.id === seg.alumnoId);
         if (alumno) {
           posts.push({
@@ -4056,17 +5089,22 @@ function DashboardTab({
       });
     }
     
-    // Ordenar por prioridad descendente y luego por fecha descendente (más nuevo primero)
-    return posts.sort((a, b) => {
-      // Primero por prioridad (mayor prioridad primero)
-      if (a.prioridad !== b.prioridad) {
-        return b.prioridad - a.prioridad;
-      }
-      // Luego por fecha (más reciente primero)
+    // Ordenar SOLO por fecha descendente (más nuevo primero), ignorando prioridad
+    const feedOrdenado = posts.sort((a, b) => {
       const fechaA = new Date(a.fecha).getTime();
       const fechaB = new Date(b.fecha).getTime();
       return fechaB - fechaA; // Más nuevo primero
     });
+    
+    console.log('📋 FEED FINAL:', {
+      total: feedOrdenado.length,
+      mensajes: feedOrdenado.filter(p => p.tipo === 'MENSAJE').length,
+      asistencias: feedOrdenado.filter(p => p.tipo === 'ASISTENCIA').length,
+      evaluaciones: feedOrdenado.filter(p => p.tipo === 'EVALUACION').length,
+      seguimientos: feedOrdenado.filter(p => p.tipo === 'SEGUIMIENTO').length
+    });
+    
+    return feedOrdenado;
   }, [mensajes, asistenciasData, calificacionesData, seguimientosData, alumnos, fechaLimite, selectedDate, fechaBaseInicio, fechaBaseFin]);
   
   // Aplicar filtros
@@ -4085,79 +5123,6 @@ function DashboardTab({
     }
     
     // 🎨 POSTEOS DE EJEMPLO (ELIMINAR DESPUÉS)
-    const posTeosDeEjemplo = [
-      {
-        id: 'ejemplo-1',
-        tipo: 'MENSAJE',
-        fecha: new Date().toISOString(),
-        contenido: {
-          id: 'ej1',
-          titulo: '🎉 ¡Bienvenida Nueva Directora!',
-          contenido: 'Nos complace anunciar que la Directora María García se unirá a nuestro equipo. ¡Esperamos un excelente año juntas!',
-          autorNombre: 'Dirección',
-          publicadoEn: new Date().toISOString(),
-          creadoEn: new Date().toISOString(),
-          leido: false,
-          imagen: undefined
-        },
-        alumno: null,
-        prioridad: 3
-      },
-      {
-        id: 'ejemplo-2',
-        tipo: 'MENSAJE',
-        fecha: new Date(Date.now() - 86400000).toISOString(),
-        contenido: {
-          id: 'ej2',
-          titulo: '🏆 Ganadores Olimpíada Matemática',
-          contenido: 'Felicitamos a nuestros estudiantes por obtener el primer lugar en la competencia regional. ¡Orgullo del colegio!',
-          autorNombre: 'Rectorado',
-          publicadoEn: new Date(Date.now() - 86400000).toISOString(),
-          creadoEn: new Date(Date.now() - 86400000).toISOString(),
-          leido: true,
-          imagen: undefined
-        },
-        alumno: null,
-        prioridad: 3
-      },
-      {
-        id: 'ejemplo-3',
-        tipo: 'MENSAJE',
-        fecha: new Date(Date.now() - 172800000).toISOString(),
-        contenido: {
-          id: 'ej3',
-          titulo: '📚 Nueva Biblioteca Digital',
-          contenido: 'Ya disponible: acceso a miles de libros y recursos educativos. Ingresa con tu usuario del colegio.',
-          autorNombre: 'Biblioteca',
-          publicadoEn: new Date(Date.now() - 172800000).toISOString(),
-          creadoEn: new Date(Date.now() - 172800000).toISOString(),
-          leido: true,
-          imagen: undefined
-        },
-        alumno: null,
-        prioridad: 3
-      },
-      {
-        id: 'ejemplo-4',
-        tipo: 'MENSAJE',
-        fecha: new Date(Date.now() - 259200000).toISOString(),
-        contenido: {
-          id: 'ej4',
-          titulo: '⚽ Campeonato Inter-colegial',
-          contenido: 'Nos vemos el 15/11 en el estadio municipal. ¡Ven a apoyar a nuestros deportistas! Evento abierto a toda la comunidad.',
-          autorNombre: 'Deportes',
-          publicadoEn: new Date(Date.now() - 259200000).toISOString(),
-          creadoEn: new Date(Date.now() - 259200000).toISOString(),
-          leido: true,
-          imagen: undefined
-        },
-        alumno: null,
-        prioridad: 3
-      }
-    ];
-    
-    // DESCOMENTAR LA LÍNEA DE ABAJO PARA VER LOS POSTEOS DE EJEMPLO
-    postsFiltrados = [...posTeosDeEjemplo, ...postsFiltrados];
     
     return postsFiltrados;
   }, [feedPosts, filtroTipo, selectedAlumnoId]);
@@ -4189,6 +5154,11 @@ function DashboardTab({
         id: m.id, 
         titulo: m.contenido.titulo,
         alumno: m.alumno
+      })),
+      detallesGrupos: Object.entries(grupos).map(([alumnoId, posts]: [string, any]) => ({
+        alumnoId,
+        totalPosts: posts.length,
+        tipos: posts.map(p => p.tipo)
       }))
     });
     
@@ -4294,726 +5264,436 @@ function DashboardTab({
   
   // Ya no mostramos loading aquí, lo maneja la transición de tabs
   
+  // Ordenar mensajes por fecha descendente (más recientes primero)
+  const mensajesOrdenados = [...mensajes].sort((a, b) => {
+    const fechaA = new Date(a.publicadoEn || a.creadoEn).getTime();
+    const fechaB = new Date(b.publicadoEn || b.creadoEn).getTime();
+    return fechaB - fechaA;
+  });
+  
   return (
-    <Layout style={{ flex: 1 }} level="2">
+    <Layout style={{ flex: 1, backgroundColor: colors.bg_primary }} level="2">
       {/* Filtro de alumnos */}
       <FiltroAlumnos 
         alumnos={alumnos}
         selectedAlumnoId={selectedAlumnoId}
         setSelectedAlumnoId={setSelectedAlumnoId}
+        isDarkMode={isDarkMode}
       />
       
-      <ScrollView
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#00BFA5']}
-            tintColor="#00BFA5"
-          />
-        }
+      {/* Feed de Mensajes - Instagram Style */}
+      <ScrollView 
+        style={{ flex: 1, backgroundColor: colors.bg_primary }} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 10, paddingBottom: 80 }}
       >
-        {/* 📸 CARRUSEL DE POSTEOS GENERALES */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-          <CarruselPosteos mensajesGenerales={postsPorAlumno.mensajesGenerales} />
-        </View>
-
-        {/* Header de bienvenida con fecha */}
-        <View style={{ padding: 16, paddingBottom: 8 }}>
-          <Text category="h6" style={{ color: '#2E3A59', marginBottom: 4 }}>
-            {selectedDate ? '📅 Actividad del día' : '🏠 Novedades de Hoy'}
-          </Text>
-          <Text appearance="hint" style={{ fontSize: 13 }}>
-            {selectedDate 
-              ? new Date(selectedDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-              : new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-            }
-          </Text>
-        </View>
-
-        {/* Cards por Alumno - COMPRIMIDO Y EXPANDIBLE */}
-        <View style={{ paddingHorizontal: 16, gap: 12 }}>
-          {(() => {
-            // Filtrar alumnos si hay un filtro activo
-            const alumnosFiltrados = selectedAlumnoId 
-              ? alumnos.filter((a: any) => a.id === selectedAlumnoId)
-              : alumnos;
-
-            // Calcular rango de fechas para filtrar novedades recientes
-            const fechaLimiteMensajes = selectedDate 
-              ? new Date(selectedDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-              : fechaBaseInicio;
-
-            // Calcular novedades por alumno (solo recientes)
-            const alumnosConNovedades = alumnosFiltrados.map((alumno: any) => {
-              // Mensajes del alumno (solo recientes y del rango de fechas)
-              const mensajesAlumno = mensajes.filter((m: any) => {
-                const fechaMensaje = new Date(m.publicadoEn || m.creadoEn);
-                const enRango = fechaMensaje >= fechaLimiteMensajes && fechaMensaje <= fechaBaseFin;
-                
-                // Verificar si el alumno es destinatario
-                if (m.destinatarioIds && Array.isArray(m.destinatarioIds)) {
-                  return enRango && m.destinatarioIds.includes(alumno.id);
-                }
-                
-                // Si no tiene destinatarios específicos, es mensaje general (no contar por alumno)
-                return false;
-              });
-              
-              // Asistencias del alumno (procesar estructura correcta de asistenciasTutor)
-              const asistenciasAlumno: any[] = [];
-              if (asistenciasData?.asistenciasTutor) {
-                asistenciasData.asistenciasTutor.forEach((asistencia: any) => {
-                  asistencia.registros.forEach((registro: any) => {
-                    if (registro.alumnoId === alumno.id) {
-                      // Extraer solo la fecha (YYYY-MM-DD) del formato ISO
-                      const fechaSoloDate = asistencia.fecha.split('T')[0];
-                      
-                      asistenciasAlumno.push({
-                        alumnoId: registro.alumnoId,
-                        fecha: fechaSoloDate,
-                        presente: registro.estado === 'PRESENTE',
-                        estado: registro.estado,
-                        observaciones: registro.observaciones
-                      });
-                    }
-                  });
-                });
-              }
-              
-              // Evaluaciones del alumno (filtrar por fecha límite de 30 días y por alumno)
-              let evaluacionesAlumno: any[] = [];
-              if (calificacionesData?.calificacionesTutor) {
-                calificacionesData.calificacionesTutor.forEach((materia: any) => {
-                  if (materia.evaluaciones) {
-                    materia.evaluaciones.forEach((evaluacion: any) => {
-                      const fechaEval = new Date(evaluacion.fecha);
-                      const enRango = fechaEval >= fechaLimite && fechaEval <= fechaBaseFin;
-                      
-                      // Verificar si esta evaluación tiene una nota para este alumno
-                      if (enRango && evaluacion.notas) {
-                        const tieneNotaAlumno = evaluacion.notas.some((nota: any) => 
-                          nota.alumnoId === alumno.id
-                        );
-                        if (tieneNotaAlumno) {
-                          evaluacionesAlumno.push(evaluacion);
-                        }
-                      }
-                    });
-                  }
-                });
-              }
-              
-              // Seguimientos del alumno (ya vienen filtrados por fecha desde el query)
-              const seguimientosAlumno = seguimientosData?.seguimientosDiariosPorAlumno?.filter((s: any) => 
-                s.alumnoId === alumno.id
-              ) || [];
-              
-              // Verificar si tiene asistencia de HOY
-              const hoyStr = formatearFechaLocal(new Date());
-              const asistenciaHoy = asistenciasAlumno.find((a: any) => a.fecha === hoyStr);
-              const tieneAsistenciaHoy = !!asistenciaHoy;
-              
-              // Contar total de novedades (asistencia solo cuenta si tiene registro de hoy)
-              const totalNovedades = 
-                (filtroTipo.includes('MENSAJE') ? mensajesAlumno.length : 0) +
-                (filtroTipo.includes('ASISTENCIA') && tieneAsistenciaHoy ? 1 : 0) +
-                (filtroTipo.includes('EVALUACION') ? evaluacionesAlumno.length : 0) +
-                (filtroTipo.includes('SEGUIMIENTO') ? seguimientosAlumno.length : 0);
-              
-              return {
-                ...alumno,
-                mensajes: mensajesAlumno,
-                asistencias: asistenciasAlumno,
-                evaluaciones: evaluacionesAlumno,
-                seguimientos: seguimientosAlumno,
-                totalNovedades
-              };
-            });
-
-            // Ordenar: primero los que tienen novedades, luego los que no
-            const alumnosOrdenados = alumnosConNovedades.sort((a, b) => {
-              if (a.totalNovedades > 0 && b.totalNovedades === 0) return -1;
-              if (a.totalNovedades === 0 && b.totalNovedades > 0) return 1;
-              return b.totalNovedades - a.totalNovedades;
-            });
-
-            return alumnosOrdenados.map((alumno: any) => {
-              const isExpanded = expandedPosts[`alumno-${alumno.id}`];
-              const tieneNovedades = alumno.totalNovedades > 0;
-              
-              return (
-                <Card 
-                  key={alumno.id} 
-                  style={{ 
-                    marginBottom: 0, 
-                    borderRadius: 12, 
-                    backgroundColor: tieneNovedades ? '#FFFFFF' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: tieneNovedades ? '#E0E8F1' : '#E6EBF0',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {/* Header Comprimido - Siempre Visible */}
-                  <TouchableOpacity 
-                    onPress={() => setExpandedPosts(prev => ({ ...prev, [`alumno-${alumno.id}`]: !isExpanded }))}
-                    style={{ 
-                      flexDirection: 'row', 
-                      alignItems: 'center', 
-                      justifyContent: 'space-between',
-                      paddingHorizontal: 12,
-                      paddingVertical: 12,
-                      backgroundColor: tieneNovedades ? '#FFFFFF' : '#F8FAFB'
-                    }}
-                  >
-                    {/* Avatar + Info */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <View style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 20,
-                        backgroundColor: tieneNovedades ? '#00BFA5' : '#CBD5E0',
-                        justifyContent: 'center',
-                        alignItems: 'center'
-                      }}>
-                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' }}>
-                          {alumno.nombre.charAt(0)}{alumno.apellido.charAt(0)}
-                        </Text>
-                      </View>
-                      
-                      <View style={{ flex: 1 }}>
-                        <Text category="s2" style={{ color: '#2E3A59', fontWeight: '600' }}>
-                          {alumno.nombre} {alumno.apellido}
-                        </Text>
-                        <Text appearance="hint" category="c2" style={{ fontSize: 11 }}>
-                          {alumno.nivel} {alumno.division ? `• ${alumno.division}` : ''}
-                        </Text>
-                      </View>
-                    </View>
-                    
-                    {/* Indicador de Novedades + Icono Expandir */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      {tieneNovedades && (
-                        <View style={{
-                          backgroundColor: '#00BFA5',
-                          paddingHorizontal: 8,
-                          paddingVertical: 4,
-                          borderRadius: 12
-                        }}>
-                          <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 12 }}>
-                            {alumno.totalNovedades}
-                          </Text>
-                        </View>
-                      )}
-                      
-                      <Icon 
-                        name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"} 
-                        fill={tieneNovedades ? '#00BFA5' : '#CBD5E0'} 
-                        style={{ width: 20, height: 20 }} 
-                      />
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Contenido Expandible */}
-                  {isExpanded && (
-                    <View style={{ 
-                      borderTopWidth: 1, 
-                      borderTopColor: '#E6EBF0',
-                      paddingHorizontal: 12,
-                      paddingVertical: 12,
-                      gap: 8,
-                      backgroundColor: tieneNovedades ? '#FAFBFC' : '#F8FAFB'
-                    }}>
-                      {/* Mensajes */}
-                      {filtroTipo.includes('MENSAJE') && (
-                        <TouchableOpacity
-                          style={{ 
-                            flexDirection: 'row', 
-                            alignItems: 'center', 
-                            gap: 8,
-                            paddingHorizontal: 8,
-                            paddingVertical: 8,
-                            borderRadius: 8,
-                            backgroundColor: alumno.mensajes.length > 0 ? '#EFF6FF' : '#F9FAFB'
-                          }}
-                          onPress={() => {
-                            if (alumno.mensajes.length > 0) {
-                              setSelectedAlumnoId(alumno.id);
-                              setActiveTab('mensajes');
-                            }
-                          }}
-                        >
-                          <Icon name="email-outline" fill="#3B82F6" style={{ width: 18, height: 18 }} />
-                          <View style={{ flex: 1 }}>
-                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Mensajes</Text>
-                          </View>
-                          <Text style={{ 
-                            color: alumno.mensajes.length > 0 ? '#3B82F6' : '#9CA3AF',
-                            fontWeight: 'bold',
-                            fontSize: 13
-                          }}>
-                            {alumno.mensajes.length}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      {/* Asistencias */}
-                      {filtroTipo.includes('ASISTENCIA') && (() => {
-                        const hoyStr = formatearFechaLocal(new Date());
-                        const asistenciaHoy = alumno.asistencias.find((a: any) => a.fecha === hoyStr);
-                        const tieneAsistenciaHoy = !!asistenciaHoy;
-                        const estaPresente = asistenciaHoy?.presente || false;
-                        
-                        return (
-                          <TouchableOpacity
-                            style={{ 
-                              flexDirection: 'row', 
-                              alignItems: 'center', 
-                              gap: 8,
-                              paddingHorizontal: 8,
-                              paddingVertical: 8,
-                              borderRadius: 8,
-                              backgroundColor: tieneAsistenciaHoy 
-                                ? (estaPresente ? '#ECFDF5' : '#FEE2E2') 
-                                : '#F9FAFB'
-                            }}
-                            onPress={() => {
-                              setSelectedAlumnoId(alumno.id);
-                              setActiveTab('asistencias');
-                            }}
-                          >
-                            <Icon 
-                              name={tieneAsistenciaHoy ? (estaPresente ? "checkmark-circle-outline" : "close-circle-outline") : "alert-circle-outline"} 
-                              fill={tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF'} 
-                              style={{ width: 18, height: 18 }} 
-                            />
-                            <View style={{ flex: 1 }}>
-                              <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Asistencia</Text>
-                            </View>
-                            <Text style={{ 
-                              color: tieneAsistenciaHoy ? (estaPresente ? '#10B981' : '#EF4444') : '#9CA3AF',
-                              fontWeight: 'bold',
-                              fontSize: 12
-                            }}>
-                              {tieneAsistenciaHoy 
-                                ? (estaPresente ? 'PRESENTE' : 'AUSENTE')
-                                : 'N/A'}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })()}
-
-                      {/* Evaluaciones */}
-                      {filtroTipo.includes('EVALUACION') && (
-                        <TouchableOpacity
-                          style={{ 
-                            flexDirection: 'row', 
-                            alignItems: 'center', 
-                            gap: 8,
-                            paddingHorizontal: 8,
-                            paddingVertical: 8,
-                            borderRadius: 8,
-                            backgroundColor: alumno.evaluaciones.length > 0 ? '#FFFBEB' : '#F9FAFB'
-                          }}
-                          onPress={() => {
-                            if (alumno.evaluaciones.length > 0) {
-                              setSelectedAlumnoId(alumno.id);
-                              setActiveTab('evaluaciones');
-                            }
-                          }}
-                        >
-                          <Icon name="star-outline" fill="#F59E0B" style={{ width: 18, height: 18 }} />
-                          <View style={{ flex: 1 }}>
-                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Evaluaciones</Text>
-                          </View>
-                          <Text style={{ 
-                            color: alumno.evaluaciones.length > 0 ? '#F59E0B' : '#9CA3AF',
-                            fontWeight: 'bold',
-                            fontSize: 13
-                          }}>
-                            {alumno.evaluaciones.length}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      {/* Seguimientos */}
-                      {filtroTipo.includes('SEGUIMIENTO') && alumno.nivel === 'MATERNAL' && (
-                        <TouchableOpacity
-                          style={{ 
-                            flexDirection: 'row', 
-                            alignItems: 'center', 
-                            gap: 8,
-                            paddingHorizontal: 8,
-                            paddingVertical: 8,
-                            borderRadius: 8,
-                            backgroundColor: alumno.seguimientos.length > 0 ? '#F5F3FF' : '#F9FAFB'
-                          }}
-                          onPress={() => {
-                            if (alumno.seguimientos.length > 0) {
-                              setSelectedAlumnoId(alumno.id);
-                              setActiveTab('seguimiento');
-                            }
-                          }}
-                        >
-                          <Icon name="heart-outline" fill="#8B5CF6" style={{ width: 18, height: 18 }} />
-                          <View style={{ flex: 1 }}>
-                            <Text category="c2" style={{ color: '#2E3A59', fontWeight: '500' }}>Seguimiento</Text>
-                          </View>
-                          <Text style={{ 
-                            color: alumno.seguimientos.length > 0 ? '#8B5CF6' : '#9CA3AF',
-                            fontWeight: 'bold',
-                            fontSize: 13
-                          }}>
-                            {alumno.seguimientos.length}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )}
-                </Card>
-              );
-            });
-          })()}
-        </View>
-        
-        <View style={{ height: 80 }} />
-      </ScrollView>
-      
-      {/* Modal de Filtros */}
-      <Modal
-        visible={mostrarModalFiltros}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setMostrarModalFiltros(false)}
-      >
-        {/* Blur de fondo */}
-        {Platform.OS === 'ios' ? (
-          <BlurView
-            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-            blurType="light"
-            blurAmount={20}
-            reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.9)"
-          />
-        ) : (
-          <View style={{ 
-            position: 'absolute', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0,
-            backgroundColor: 'rgba(255, 255, 255, 0.85)'
-          }} />
-        )}
-        
-        <View style={{ 
-          flex: 1, 
-          backgroundColor: 'rgba(0, 0, 0, 0.5)', 
-          justifyContent: 'flex-end'
-        }}>
-          <View style={{ 
-            backgroundColor: '#FFFFFF', 
-            borderTopLeftRadius: 24, 
-            borderTopRightRadius: 24,
-            padding: 20,
-            maxHeight: '80%'
-          }}>
-            {/* Header del modal */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text category="h6" style={{ color: '#2E3A59' }}>Filtros</Text>
-              <TouchableOpacity onPress={() => setMostrarModalFiltros(false)}>
-                <Icon name="close-outline" style={{ width: 28, height: 28 }} fill="#8F9BB3" />
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Filtros por tipo */}
-              <Text category="s1" style={{ marginBottom: 12, color: '#2E3A59' }}>Tipo de novedad</Text>
-              <View style={{ gap: 10, marginBottom: 24 }}>
-                <TouchableOpacity
-                  onPress={() => toggleFiltroTipo('MENSAJE')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: filtroTipo.includes('MENSAJE') ? '#FFE8EE' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: filtroTipo.includes('MENSAJE') ? '#FF3D71' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#FFE8EE',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="email" fill="#FF3D71" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>Mensajes</Text>
-                  {filtroTipo.includes('MENSAJE') && (
-                    <Icon name="checkmark-circle-2" fill="#FF3D71" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  onPress={() => toggleFiltroTipo('ASISTENCIA')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: filtroTipo.includes('ASISTENCIA') ? '#E8F8F5' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: filtroTipo.includes('ASISTENCIA') ? '#00BFA5' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#E8F8F5',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="calendar" fill="#00BFA5" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>Asistencias</Text>
-                  {filtroTipo.includes('ASISTENCIA') && (
-                    <Icon name="checkmark-circle-2" fill="#00BFA5" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  onPress={() => toggleFiltroTipo('EVALUACION')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: filtroTipo.includes('EVALUACION') ? '#E3F2FD' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: filtroTipo.includes('EVALUACION') ? '#2196F3' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#E3F2FD',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="bar-chart" fill="#2196F3" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>Evaluaciones</Text>
-                  {filtroTipo.includes('EVALUACION') && (
-                    <Icon name="checkmark-circle-2" fill="#2196F3" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  onPress={() => toggleFiltroTipo('SEGUIMIENTO')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: filtroTipo.includes('SEGUIMIENTO') ? '#FFF3E0' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: filtroTipo.includes('SEGUIMIENTO') ? '#FFB020' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#FFF3E0',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="activity" fill="#FFB020" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>Seguimiento Diario</Text>
-                  {filtroTipo.includes('SEGUIMIENTO') && (
-                    <Icon name="checkmark-circle-2" fill="#FFB020" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-              </View>
-              
-              {/* Filtros por alumno - ELIMINADO (ahora está en el header) */}
-              
-              {/* Filtro por fecha */}
-              <Divider style={{ marginBottom: 16 }} />
-              <Text category="s1" style={{ marginBottom: 12, color: '#2E3A59' }}>Fecha</Text>
-              <View style={{ gap: 10, marginBottom: 16 }}>
-                {/* Botón "Hoy" */}
-                <TouchableOpacity
-                  onPress={() => setSelectedDate(null)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: !selectedDate ? '#E6F7F4' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: !selectedDate ? '#00BFA5' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#E6F7F4',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="calendar" fill="#00BFA5" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>Hoy</Text>
-                  {!selectedDate && (
-                    <Icon name="checkmark-circle-2" fill="#00BFA5" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-                
-                {/* Botón para seleccionar fecha */}
-                <TouchableOpacity
-                  onPress={() => setShowDatePicker(true)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: selectedDate ? '#E6F7F4' : '#F8FAFB',
-                    borderWidth: 1,
-                    borderColor: selectedDate ? '#00BFA5' : '#E4E9F2'
-                  }}
-                >
-                  <View style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: '#E6F7F4',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    marginRight: 12
-                  }}>
-                    <Icon name="calendar-outline" fill="#00BFA5" style={{ width: 20, height: 20 }} />
-                  </View>
-                  <Text style={{ flex: 1, color: '#2E3A59' }}>
-                    {selectedDate 
-                      ? selectedDate.toLocaleDateString('es-AR', { 
-                          weekday: 'long', 
-                          day: 'numeric', 
-                          month: 'long' 
-                        })
-                      : 'Seleccionar otro día'
-                    }
-                  </Text>
-                  {selectedDate && (
-                    <Icon name="checkmark-circle-2" fill="#00BFA5" style={{ width: 24, height: 24 }} />
-                  )}
-                </TouchableOpacity>
-              </View>
-              
-              {/* Botones de acción */}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                <Button
-                  style={{ flex: 1 }}
-                  appearance="outline"
-                  onPress={() => {
-                    setFiltroTipo(['MENSAJE', 'ASISTENCIA', 'EVALUACION', 'SEGUIMIENTO']);
-                    setSelectedAlumnoId(null);
-                    setSelectedDate(null);
-                  }}
-                >
-                  Limpiar
-                </Button>
-                <Button
-                  style={{ flex: 1 }}
-                  onPress={() => setMostrarModalFiltros(false)}
-                >
-                  Aplicar
-                </Button>
-              </View>
-            </ScrollView>
+        {mensajesLoading && feedPostsFiltrados.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+            <Spinner size="giant" status="info" />
+            <Text category="s1" style={{ marginTop: 16, color: colors.accent_rose }}>
+              Cargando novedades...
+            </Text>
           </View>
-        </View>
-      </Modal>
-      
-      {/* Modal de DatePicker */}
-      {showDatePicker && (
-        <Modal
-          visible={true}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowDatePicker(false)}
-        >
-          <View 
-            style={{ 
-              flex: 1, 
-              backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+        ) : feedPostsFiltrados.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+            <View style={{ 
+              width: 100, 
+              height: 100, 
+              borderRadius: 50, 
+              backgroundColor: colors.bg_tertiary, 
               justifyContent: 'center', 
               alignItems: 'center',
-              padding: 20
-            }}
-          >
-            <TouchableOpacity 
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-              activeOpacity={1}
-              onPress={() => setShowDatePicker(false)}
-            />
-            
-            <View style={{ width: '100%', maxWidth: 400, zIndex: 1 }}>
-              <Card disabled style={{ borderRadius: 20 }}>
-                <Text category="h6" style={{ marginBottom: 16, textAlign: 'center' }}>
-                  Seleccionar fecha
-                </Text>
-                
-                {/* DatePicker */}
-                <Datepicker
-                  date={tempDate}
-                  onSelect={(date) => setTempDate(date)}
-                  filter={(date) => {
-                    // Deshabilitar sábados (6) y domingos (0)
-                    const diaSemana = date.getDay();
-                    return diaSemana !== 0 && diaSemana !== 6;
-                  }}
-                  style={{ marginBottom: 16 }}
-                />
-                
-                {/* Botones de acción */}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Button
-                    style={{ flex: 1 }}
-                    appearance="outline"
-                    onPress={() => setShowDatePicker(false)}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    style={{ flex: 1 }}
-                    onPress={() => {
-                      setSelectedDate(tempDate);
-                      setShowDatePicker(false);
-                    }}
-                  >
-                    Seleccionar
-                  </Button>
-                </View>
-              </Card>
+              marginBottom: 16
+            }}>
+              <Icon name="inbox-outline" style={{ width: 50, height: 50 }} fill={colors.accent_rose} />
             </View>
+            <Text category="h6" style={{ color: colors.accent_rose, marginBottom: 8 }}>No hay novedades</Text>
+            <Text appearance="hint" style={{ textAlign: 'center', color: colors.text_tertiary }}>
+              Las novedades (mensajes, asistencias, evaluaciones) aparecerán aquí
+            </Text>
           </View>
-        </Modal>
-      )}
+        ) : (
+          <View style={{ alignItems: 'center' }}>
+            {/* Renderizar todos los posts ordenados por fecha más reciente, sin agrupación */}
+            {feedPostsFiltrados.map((post: any) => {
+              // Renderizar componente según tipo
+              const renderPost = () => {
+                switch (post.tipo) {
+                  case 'MENSAJE':
+                    return (
+                      <MensajePostWrapper 
+                        mensaje={post.contenido}
+                        onNavigateToSection={handleNavigateToSection}
+                        isDarkMode={isDarkMode}
+                        mostrarBadgeAlumno={!!post.alumno}
+                        alumno={post.alumno || null}
+                      />
+                    );
+                  case 'ASISTENCIA':
+                    return (
+                      <AsistenciaPost 
+                        asistencia={post.contenido} 
+                        alumno={post.alumno} 
+                        onNavigateToSection={handleNavigateToSection}
+                        mostrarBadgeAlumno={true}
+                      />
+                    );
+                  case 'EVALUACION':
+                    return (
+                      <EvaluacionPost 
+                        evaluacion={post.contenido} 
+                        alumno={post.alumno} 
+                        onNavigateToSection={handleNavigateToSection}
+                        mostrarBadgeAlumno={true}
+                      />
+                    );
+                  case 'SEGUIMIENTO':
+                    return (
+                      <SeguimientoPost 
+                        seguimiento={post.contenido} 
+                        alumno={post.alumno} 
+                        onNavigateToSection={handleNavigateToSection}
+                        mostrarBadgeAlumno={true}
+                      />
+                    );
+                  default:
+                    return null;
+                }
+              };
+              
+              return (
+                <View key={post.id} style={{ width: '100%', paddingHorizontal: 10, marginBottom: 8 }}>
+                  {renderPost()}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
     </Layout>
   );
+}
+
+// 🎬 Componente wrapper que maneja la reacción de un mensaje
+function MensajePostWrapper({ mensaje, onNavigateToSection, isDarkMode = false, mostrarBadgeAlumno = false, alumno = null, grado = null, division = null }: { mensaje: any; onNavigateToSection?: (section: string) => void; isDarkMode?: boolean; mostrarBadgeAlumno?: boolean; alumno?: any; grado?: any; division?: any }) {
+  const [expandedContent, setExpandedContent] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [loadingImages, setLoadingImages] = useState<{ [key: number]: boolean }>({});
+  const [carouselWidth, setCarouselWidth] = useState(0);
+  const flatListRef = useRef(null);
+  
+  // Validación: No renderizar si no hay ID o datos críticos
+  if (!mensaje || !mensaje.id) {
+    console.warn('⚠️ MensajePostWrapper: mensaje sin ID, saltando render');
+    return null;
+  }
+
+  try {
+    // DISABLED: Hook depends on broken query
+    // const { miReaccion, totalReacciones, handleToggleReaccion } = useMensajeReaccion(mensaje.id);
+    const miReaccion = null;
+    const totalReacciones = {};
+    const handleToggleReaccion = () => {};
+    
+    // Validar que el tipo sea uno válido para mensajes generales
+    const tiposValidos = ['ANUNCIO_GENERAL', 'RECORDATORIO', 'NOTA_EXAMEN', 'GALERIA', 'MENSAJE_PRIVADO', 'INFORME', 'CONSULTA_TUTOR'];
+    const tipoMensaje = tiposValidos.includes(mensaje.tipo) ? mensaje.tipo : 'ANUNCIO_GENERAL';
+    
+    // Obtener todas las imágenes (múltiples o una sola)
+    const todasLasImagenes = (mensaje.imagenes && mensaje.imagenes.length > 0) ? mensaje.imagenes : mensaje.imagen ? [mensaje.imagen] : [];
+
+    const handleScroll = (e: any) => {
+      if (carouselWidth === 0) return;
+      const contentOffsetX = e.nativeEvent.contentOffset.x;
+      const index = Math.round(contentOffsetX / carouselWidth);
+      setCurrentImageIndex(Math.max(0, Math.min(index, todasLasImagenes.length - 1)));
+    };
+
+    const formatDate = (date: any) => {
+      if (!date) return 'Sin fecha';
+      const d = new Date(date);
+      return d.toLocaleDateString('es-AR', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+
+    return (
+      <View style={{ width: '100%' }}>
+        {mostrarBadgeAlumno && alumno && (
+          <View style={{ 
+            backgroundColor: '#F093FB20',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16
+          }}>
+            <Text style={{ 
+              fontWeight: '600',
+              fontSize: 14,
+              color: '#6B4C85'
+            }}>
+              {alumno.nombre}
+            </Text>
+          </View>
+        )}
+        {(mensaje.alcance === 'GRADO' || mensaje.alcance === 'DIVISION') && !mostrarBadgeAlumno && (
+          <View style={{ 
+            backgroundColor: '#6ff1ae60',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16
+          }}>
+            <Text style={{ 
+              fontWeight: '600',
+              fontSize: 14,
+              color: '#064E3B'
+            }}>
+              {mensaje.alcance === 'GRADO' ? `${tipoMensaje.replace(/_/g, ' ')} a Grado` : `${tipoMensaje.replace(/_/g, ' ')} a División`}
+            </Text>
+          </View>
+        )}
+        
+        <Card
+          style={{ 
+            borderRadius: (mostrarBadgeAlumno && alumno) || (mensaje.alcance === 'GRADO' || mensaje.alcance === 'DIVISION') && !mostrarBadgeAlumno ? 0 : 16,
+            borderTopLeftRadius: (mostrarBadgeAlumno && alumno) || (mensaje.alcance === 'GRADO' || mensaje.alcance === 'DIVISION') && !mostrarBadgeAlumno ? 0 : 16,
+            borderTopRightRadius: (mostrarBadgeAlumno && alumno) || (mensaje.alcance === 'GRADO' || mensaje.alcance === 'DIVISION') && !mostrarBadgeAlumno ? 0 : 16,
+            backgroundColor: '#FFFFFF',
+            borderWidth: 1,
+            borderColor: '#E4E9F2',
+            overflow: 'hidden',
+            paddingTop: 16,
+            paddingBottom: 16,
+            paddingHorizontal: 16,
+            width: '100%'
+          }}
+        >
+          {/* Título */}
+          <Text style={{ 
+            fontSize: 16,
+            fontWeight: 'bold',
+            color: '#3D3D5C',
+            marginBottom: 8
+          }}>
+            {mensaje.titulo || 'Sin título'}
+          </Text>
+          
+          {/* Metadata: Autor, Fecha, Tipo */}
+          <View style={{ marginBottom: 12, gap: 8 }}>
+            <Text style={{ 
+              fontSize: 12,
+              color: '#8F9BB3'
+            }}>
+              {mensaje.autorNombre || 'Anónimo'}
+            </Text>
+            <Text style={{ 
+              fontSize: 11,
+              color: '#8F9BB3'
+            }}>
+              {formatDate(mensaje.publicadoEn || mensaje.creadoEn)}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              {tipoMensaje && (
+                <View style={{ 
+                  backgroundColor: tipoMensaje === 'GENERAL' ? '#E6F7FF' : '#F0E6FF',
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 8,
+                  alignSelf: 'flex-start'
+                }}>
+                  <Text style={{ 
+                    fontSize: 10,
+                    fontWeight: '600',
+                    color: tipoMensaje === 'GENERAL' ? '#0369A1' : '#6D28D9',
+                    textTransform: 'uppercase'
+                  }}>
+                    {tipoMensaje}
+                  </Text>
+                </View>
+              )}
+              {mensaje.alcance && (
+                <View style={{ 
+                  backgroundColor: mensaje.alcance === 'COLEGIO' ? '#E0F2FE' : '#FEF3C7',
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 8,
+                  alignSelf: 'flex-start'
+                }}>
+                  <Text style={{ 
+                    fontSize: 10,
+                    fontWeight: '600',
+                    color: mensaje.alcance === 'COLEGIO' ? '#0284C7' : '#B45309',
+                    textTransform: 'uppercase'
+                  }}>
+                    {mensaje.alcance === 'COLEGIO' ? 'Toda la institución' : 
+                     mensaje.alcance === 'GRADO' ? 'Por grado' :
+                     mensaje.alcance === 'DIVISION' ? 'Por división' :
+                     mensaje.alcance === 'ALUMNO' ? 'Personal' : mensaje.alcance}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+          
+          {/* Contenido con expansión */}
+          <Text style={{ 
+            fontSize: 14,
+            color: '#3D3D5C',
+            lineHeight: 20,
+            marginBottom: 12
+          }}>
+            {expandedContent ? mensaje.contenido : mensaje.contenido?.substring(0, 150)}
+            {!expandedContent && mensaje.contenido?.length > 150 && '...'}
+          </Text>
+          
+          {/* Botón más/menos */}
+          {mensaje.contenido?.length > 150 && (
+            <TouchableOpacity 
+              onPress={() => setExpandedContent(!expandedContent)}
+              style={{ marginBottom: 12 }}
+            >
+              <Text style={{ 
+                fontSize: 12,
+                color: '#764BA2',
+                fontWeight: '600'
+              }}>
+                {expandedContent ? 'menos' : 'más'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {/* Carrusel de Imágenes */}
+          {todasLasImagenes.length > 0 && (
+            <View 
+              onLayout={(e) => setCarouselWidth(e.nativeEvent.layout.width)}
+              style={{ marginBottom: 12, position: 'relative', borderRadius: 8, overflow: 'hidden', backgroundColor: '#F7FAFC', marginHorizontal: -16 }}
+            >
+              <FlatList
+                ref={flatListRef}
+                data={todasLasImagenes}
+                horizontal
+                pagingEnabled
+                scrollEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                renderItem={({ item, index }) => (
+                  <View style={{ 
+                    width: carouselWidth || Dimensions.get('window').width - 32,
+                    height: 280,
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}>
+                    {loadingImages[index] && (
+                      <View style={{ 
+                        position: 'absolute', 
+                        top: 0, 
+                        left: 0, 
+                        right: 0, 
+                        bottom: 0,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                        zIndex: 10
+                      }}>
+                        <Spinner size='large' status='basic' />
+                      </View>
+                    )}
+                    <Image
+                      source={{ uri: item }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="cover"
+                      onLoadStart={() => setLoadingImages(prev => ({ ...prev, [index]: true }))}
+                      onLoadEnd={() => setLoadingImages(prev => ({ ...prev, [index]: false }))}
+                    />
+                  </View>
+                )}
+                keyExtractor={(_, index) => index.toString()}
+              />
+              
+              {/* Contador de imágenes - Top Right */}
+              {todasLasImagenes.length > 1 && (
+                <View style={{ 
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 12,
+                  zIndex: 20
+                }}>
+                  <Text style={{ 
+                    color: '#FFFFFF',
+                    fontSize: 12,
+                    fontWeight: '600'
+                  }}>
+                    {currentImageIndex + 1}/{todasLasImagenes.length}
+                  </Text>
+                </View>
+              )}
+              
+              {/* Dots Indicator - Bottom */}
+              {todasLasImagenes.length > 1 && (
+                <View style={{ 
+                  position: 'absolute',
+                  bottom: 12,
+                  left: 0,
+                  right: 0,
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: 6,
+                  zIndex: 20
+                }}>
+                  {todasLasImagenes.map((_, index) => (
+                    <View
+                      key={index}
+                      style={{
+                        width: index === currentImageIndex ? 24 : 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: index === currentImageIndex ? '#764BA2' : 'rgba(255, 255, 255, 0.6)'
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+          
+          {onNavigateToSection && (
+            <View style={{ 
+              marginTop: 12,
+              paddingTop: 12,
+              borderTopWidth: 1,
+              borderTopColor: '#E4E9F2'
+            }}>
+              <TouchableOpacity onPress={() => onNavigateToSection('Mensajes')}>
+                <Text style={{ 
+                  fontWeight: '600',
+                  fontSize: 12,
+                  color: '#764BA2',
+                  textAlign: 'center'
+                }}>
+                  Ver todos los mensajes →
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Card>
+      </View>
+    );
+  } catch (error) {
+    console.error('❌ Error renderizando MensajePostWrapper:', error);
+    console.error('   Mensaje:', JSON.stringify(mensaje));
+    return null;
+  }
 }
 
 // 📧 Componente de Post para Mensaje
@@ -5041,7 +5721,7 @@ function MensajePost({ mensaje, expanded, onToggle }: { mensaje: any; expanded: 
           <Icon name="email" fill="#FF3D71" style={{ width: 24, height: 24 }} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text category="s1" style={{ fontWeight: 'bold', color: '#2E3A59' }}>
+          <Text category="s1" style={{ fontWeight: 'bold', color: '#3D3D5C' }}>
             {mensaje.leido ? 'Mensaje' : 'Mensaje Nuevo'}
           </Text>
           <Text appearance="hint" category="c1">
@@ -5067,7 +5747,7 @@ function MensajePost({ mensaje, expanded, onToggle }: { mensaje: any; expanded: 
       
       {!expanded && (
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 }}>
-          <Text category="c2" style={{ color: '#00BFA5' }}>
+          <Text category="c2" style={{ color: '#764BA2' }}>
             Tocar para ver más
           </Text>
         </View>
@@ -5077,70 +5757,117 @@ function MensajePost({ mensaje, expanded, onToggle }: { mensaje: any; expanded: 
 }
 
 // 📅 Componente de Post para Asistencia
-function AsistenciaPost({ asistencia, alumno }: { asistencia: any; alumno: any }) {
+function AsistenciaPost({ asistencia, alumno, onNavigateToSection, mostrarBadgeAlumno = false }: { asistencia: any; alumno: any; onNavigateToSection?: (section: string) => void; mostrarBadgeAlumno?: boolean }) {
   const presente = asistencia.estado === 'PRESENTE' || asistencia.estado === 'TARDE';
   
   return (
-    <Card 
-      style={{ 
-        borderRadius: 16, 
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E4E9F2'
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+    <View style={{ maxWidth: 500 }}>
+      {mostrarBadgeAlumno && alumno && (
         <View style={{ 
-          width: 40, 
-          height: 40, 
-          borderRadius: 20, 
-          backgroundColor: presente ? '#E8F8F5' : '#FFE8E8',
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginRight: 12
-        }}>
-          <Icon 
-            name={presente ? 'checkmark-circle-2' : 'close-circle'}
-            fill={presente ? '#00BFA5' : '#FF6B6B'}
-            style={{ width: 24, height: 24 }}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text category="s1" style={{ fontWeight: 'bold', color: '#2E3A59' }}>
-            Asistencia
-          </Text>
-          <Text appearance="hint" category="c1">
-            {formatearFechaLegible(asistencia.fecha)}
-          </Text>
-        </View>
-        <View style={{ 
-          backgroundColor: presente ? '#E8F8F5' : '#FFE8E8',
-          paddingHorizontal: 10,
-          paddingVertical: 4,
-          borderRadius: 12
+          backgroundColor: '#F093FB20',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16
         }}>
           <Text style={{ 
-            fontWeight: 'bold',
-            fontSize: 12,
-            color: presente ? '#00BFA5' : '#FF6B6B'
+            fontWeight: '600',
+            fontSize: 14,
+            color: '#9E7BAB'
           }}>
-            {asistencia.estado === 'TARDE' ? 'TARDE' : presente ? 'PRESENTE' : 'AUSENTE'}
+            {alumno.nombre}
           </Text>
         </View>
+      )}
+      <Card 
+        style={{ 
+          borderRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopLeftRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopRightRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          backgroundColor: '#FFFFFF',
+          borderWidth: 1,
+          borderColor: '#E4E9F2',
+          overflow: 'hidden',
+          paddingTop: 16,
+          paddingBottom: 16,
+          paddingHorizontal: 16
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+          <View style={{ 
+            width: 40, 
+            height: 40, 
+            borderRadius: 20, 
+            backgroundColor: presente ? '#E8F8F5' : '#FFE8E8',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginRight: 12
+          }}>
+            <Icon 
+              name={presente ? 'checkmark-circle-2' : 'close-circle'}
+              fill={presente ? '#764BA2' : '#FF6B6B'}
+              style={{ width: 24, height: 24 }}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text category="s1" style={{ fontWeight: 'bold', color: '#3D3D5C' }}>
+              Asistencia
+            </Text>
+            <Text appearance="hint" category="c1">
+              {formatearFechaLegible(asistencia.fecha)}
+            </Text>
+          </View>
+        </View>
+      
+      <View style={{ 
+        backgroundColor: presente ? '#E8F8F5' : '#FFE8E8',
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginBottom: 12
+      }}>
+        <Text style={{ 
+          fontWeight: 'bold',
+          fontSize: 12,
+          color: presente ? '#764BA2' : '#FF6B6B'
+        }}>
+          {asistencia.estado === 'TARDE' ? 'TARDE' : presente ? 'PRESENTE' : 'AUSENTE'}
+        </Text>
       </View>
       
       {asistencia.observaciones && (
-        <View style={{ backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8, marginTop: 12 }}>
+        <View style={{ backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8 }}>
           <Text appearance="hint" category="c1" style={{ marginBottom: 4 }}>Observaciones:</Text>
           <Text category="p2">{asistencia.observaciones}</Text>
         </View>
       )}
+      
+      {onNavigateToSection && (
+        <View style={{ 
+          marginTop: 12,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: '#E4E9F2'
+        }}>
+          <TouchableOpacity onPress={() => onNavigateToSection('Asistencias')}>
+            <Text style={{ 
+              fontWeight: '600',
+              fontSize: 12,
+              color: '#764BA2',
+              textAlign: 'center'
+            }}>
+              Ver todas las asistencias de {alumno?.nombre || 'alumno'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </Card>
+    </View>
   );
 }
 
 // 📊 Componente de Post para Evaluación
-function EvaluacionPost({ evaluacion, alumno }: { evaluacion: any; alumno: any }) {
+function EvaluacionPost({ evaluacion, alumno, onNavigateToSection, mostrarBadgeAlumno = false }: { evaluacion: any; alumno: any; onNavigateToSection?: (section: string) => void; mostrarBadgeAlumno?: boolean }) {
   const calificacion = evaluacion.notaAlumno?.calificacion;
   let valorMostrar = 'S/N';
   let color = '#8F9BB3';
@@ -5148,22 +5875,46 @@ function EvaluacionPost({ evaluacion, alumno }: { evaluacion: any; alumno: any }
   if (calificacion) {
     if (calificacion.tipo === 'NUMERICA' && calificacion.valorNumerico != null) {
       valorMostrar = calificacion.valorNumerico.toFixed(1);
-      color = calificacion.valorNumerico >= 7 ? '#00BFA5' : calificacion.valorNumerico >= 4 ? '#FF9800' : '#F44336';
+      color = calificacion.valorNumerico >= 7 ? '#764BA2' : calificacion.valorNumerico >= 4 ? '#FF9800' : '#F44336';
     } else if (calificacion.tipo === 'CONCEPTUAL' && calificacion.valorConceptual) {
       valorMostrar = calificacion.valorConceptual;
-      color = calificacion.aprobado ? '#00BFA5' : '#F44336';
+      color = calificacion.aprobado ? '#764BA2' : '#F44336';
     }
   }
   
   return (
-    <Card 
-      style={{ 
-        borderRadius: 16, 
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E4E9F2'
-      }}
-    >
+    <View style={{ maxWidth: 500 }}>
+      {mostrarBadgeAlumno && alumno && (
+        <View style={{ 
+          backgroundColor: color + '20',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16
+        }}>
+          <Text style={{ 
+            fontWeight: '600',
+            fontSize: 14,
+            color: color
+          }}>
+            {alumno.nombre}
+          </Text>
+        </View>
+      )}
+      <Card 
+        style={{ 
+          borderRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopLeftRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopRightRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          backgroundColor: '#FFFFFF',
+          borderWidth: 1,
+          borderColor: '#E4E9F2',
+          overflow: 'hidden',
+          paddingTop: 16,
+          paddingBottom: 16,
+          paddingHorizontal: 16
+        }}
+      >
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <View style={{ 
           width: 40, 
@@ -5177,21 +5928,11 @@ function EvaluacionPost({ evaluacion, alumno }: { evaluacion: any; alumno: any }
           <Icon name="bar-chart" fill={color} style={{ width: 24, height: 24 }} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text category="s1" style={{ fontWeight: 'bold', color: '#2E3A59' }}>
+          <Text category="s1" style={{ fontWeight: 'bold', color: '#3D3D5C' }}>
             Evaluación
           </Text>
           <Text appearance="hint" category="c1">
             {formatearFechaLegible(evaluacion.fecha)}
-          </Text>
-        </View>
-        <View style={{ 
-          backgroundColor: color + '20',
-          paddingHorizontal: 12,
-          paddingVertical: 6,
-          borderRadius: 12
-        }}>
-          <Text style={{ color, fontWeight: 'bold', fontSize: 18 }}>
-            {valorMostrar}
           </Text>
         </View>
       </View>
@@ -5203,34 +5944,92 @@ function EvaluacionPost({ evaluacion, alumno }: { evaluacion: any; alumno: any }
         {evaluacion.tema || evaluacion.tipo}
       </Text>
       
+      <View style={{ 
+        backgroundColor: color + '20',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginBottom: 12
+      }}>
+        <Text style={{ color, fontWeight: 'bold', fontSize: 18 }}>
+          {valorMostrar}
+        </Text>
+      </View>
+      
       {evaluacion.notaAlumno?.observaciones && (
-        <View style={{ backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8, marginTop: 8 }}>
+        <View style={{ backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8 }}>
           <Text appearance="hint" category="c1" style={{ marginBottom: 4 }}>Observaciones:</Text>
           <Text category="p2">{evaluacion.notaAlumno.observaciones}</Text>
         </View>
       )}
+      
+      {onNavigateToSection && (
+        <View style={{ 
+          marginTop: 12,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: '#E4E9F2'
+        }}>
+          <TouchableOpacity onPress={() => onNavigateToSection('Evaluaciones')}>
+            <Text style={{ 
+              fontWeight: '600',
+              fontSize: 12,
+              color: color,
+              textAlign: 'center'
+            }}>
+              Ver todas las evaluaciones de {alumno?.nombre || 'alumno'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </Card>
+    </View>
   );
 }
 
 // 🍼 Componente de Post para Seguimiento
-function SeguimientoPost({ seguimiento, alumno, expanded, onToggle }: { seguimiento: any; alumno: any; expanded: boolean; onToggle: () => void }) {
+function SeguimientoPost({ seguimiento, alumno, onNavigateToSection, mostrarBadgeAlumno = false }: { seguimiento: any; alumno?: any; onNavigateToSection?: (section: string) => void; mostrarBadgeAlumno?: boolean }) {
   const getEstadoColor = () => {
-    if (seguimiento.estadoDelDia === 'muy-bueno') return '#00BFA5';
+    if (seguimiento.estadoDelDia === 'muy-bueno') return '#764BA2';
     if (seguimiento.estadoDelDia === 'bueno') return '#FFB020';
     return '#FF6B6B';
   };
   
+  const headerColor = mostrarBadgeAlumno && alumno ? '#FFB020' : getEstadoColor();
+  
   return (
-    <Card 
-      style={{ 
-        borderRadius: 16, 
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E4E9F2'
-      }}
-      onPress={onToggle}
-    >
+    <View style={{ maxWidth: 500 }}>
+      {mostrarBadgeAlumno && alumno && (
+        <View style={{ 
+          backgroundColor: headerColor + '20',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16
+        }}>
+          <Text style={{ 
+            fontWeight: '600',
+            fontSize: 14,
+            color: headerColor
+          }}>
+            {alumno.nombre}
+          </Text>
+        </View>
+      )}
+      <Card 
+        style={{ 
+          borderRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopLeftRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          borderTopRightRadius: mostrarBadgeAlumno && alumno ? 0 : 16,
+          backgroundColor: '#FFFFFF',
+          borderWidth: 1,
+          borderColor: '#E4E9F2',
+          overflow: 'hidden',
+          paddingTop: 16,
+          paddingBottom: 16,
+          paddingHorizontal: 16
+        }}
+      >
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <View style={{ 
           width: 40, 
@@ -5244,27 +6043,29 @@ function SeguimientoPost({ seguimiento, alumno, expanded, onToggle }: { seguimie
           <Icon name="activity" fill="#FFB020" style={{ width: 24, height: 24 }} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text category="s1" style={{ fontWeight: 'bold', color: '#2E3A59' }}>
+          <Text category="s1" style={{ fontWeight: 'bold', color: '#3D3D5C' }}>
             Seguimiento Diario
           </Text>
           <Text appearance="hint" category="c1">
             {formatearFechaLegible(seguimiento.fecha)}
           </Text>
         </View>
-        <View style={{ 
-          backgroundColor: getEstadoColor() + '20',
-          paddingHorizontal: 10,
-          paddingVertical: 4,
-          borderRadius: 12
-        }}>
-          <Text style={{ color: getEstadoColor(), fontSize: 12, fontWeight: 'bold' }}>
-            {seguimiento.estadoDelDia?.replace(/-/g, ' ').toUpperCase()}
-          </Text>
-        </View>
+      </View>
+      
+      <View style={{
+        backgroundColor: getEstadoColor() + '20',
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginBottom: 12
+      }}>
+        <Text style={{ color: getEstadoColor(), fontSize: 12, fontWeight: 'bold' }}>
+          {seguimiento.estadoDelDia?.replace(/-/g, ' ').toUpperCase()}
+        </Text>
       </View>
       
       {/* Resumen compacto */}
-      <View style={{ flexDirection: 'row', gap: 12 }}>
+      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
         <View style={{ flex: 1, backgroundColor: '#F8FAFB', padding: 10, borderRadius: 8 }}>
           <Text appearance="hint" category="c1">Alimentación</Text>
           <Text category="s2">
@@ -5283,21 +6084,34 @@ function SeguimientoPost({ seguimiento, alumno, expanded, onToggle }: { seguimie
         </View>
       </View>
       
-      {!expanded && (
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 }}>
-          <Text category="c2" style={{ color: '#00BFA5' }}>
-            Tocar para ver más
-          </Text>
-        </View>
-      )}
-      
-      {expanded && seguimiento.notasDelDia && (
+      {seguimiento.notasDelDia && (
         <View style={{ marginTop: 12, backgroundColor: '#FEF3C7', padding: 10, borderRadius: 8 }}>
           <Text appearance="hint" category="c1" style={{ marginBottom: 4 }}>Notas:</Text>
           <Text category="p2">{seguimiento.notasDelDia}</Text>
         </View>
       )}
+      
+      {onNavigateToSection && (
+        <View style={{ 
+          marginTop: 12,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: '#E4E9F2'
+        }}>
+          <TouchableOpacity onPress={() => onNavigateToSection('Seguimientos')}>
+            <Text style={{ 
+              fontWeight: '600',
+              fontSize: 12,
+              color: '#FFB020',
+              textAlign: 'center'
+            }}>
+              Ver todos los seguimientos de {alumno?.nombre || 'alumno'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </Card>
+    </View>
   );
 }
 
@@ -5314,15 +6128,142 @@ function PlaceholderTab({ icon, title }: { icon: string; title: string }) {
   );
 }
 
-// 🎯 APP CONTENT
-function AppContent() {
+// 🎯 CUSTOM SELECT - Select personalizado legible en dark mode
+interface CustomSelectProps {
+  items: { key: string | number; title: string }[];
+  selectedKey: string | number | null;
+  onSelect: (key: string | number) => void;
+  placeholder?: string;
+  isDarkMode?: boolean;
+}
+
+function CustomSelect({ items, selectedKey, onSelect, placeholder = 'Seleccionar', isDarkMode = false }: CustomSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const colors = getColors(isDarkMode);
+  const selectedItem = items.find(item => item.key === selectedKey);
+
+  return (
+    <View>
+      <TouchableOpacity
+        onPress={() => setIsOpen(!isOpen)}
+        style={{
+          backgroundColor: isDarkMode ? colors.bg_primary : '#FFFFFF',
+          borderColor: isDarkMode ? colors.border_medium : '#E6EBF0',
+          borderWidth: 1,
+          borderRadius: 8,
+          padding: 12,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ color: selectedItem ? (isDarkMode ? colors.text_primary : '#1A1A2E') : (isDarkMode ? colors.text_tertiary : '#999') }}>
+          {selectedItem?.title || placeholder}
+        </Text>
+        <Text style={{ fontSize: 16, color: isDarkMode ? colors.text_tertiary : '#666' }}>
+          {isOpen ? '▲' : '▼'}
+        </Text>
+      </TouchableOpacity>
+
+      {isOpen && (
+        <View
+          style={{
+            backgroundColor: isDarkMode ? colors.bg_secondary : '#FFFFFF',
+            borderColor: isDarkMode ? colors.border_medium : '#E6EBF0',
+            borderWidth: 1,
+            borderTopWidth: 0,
+            borderRadius: 0,
+            marginTop: -1,
+            maxHeight: 250,
+            zIndex: 100,
+          }}
+        >
+          <ScrollView scrollEnabled={items.length > 5} nestedScrollEnabled={true}>
+            {items.map((item) => (
+              <TouchableOpacity
+                key={item.key}
+                onPress={() => {
+                  onSelect(item.key);
+                  setIsOpen(false);
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 12,
+                  backgroundColor: selectedKey === item.key ? (isDarkMode ? colors.bg_tertiary : '#F0F0F0') : (isDarkMode ? colors.bg_secondary : '#FFFFFF'),
+                  borderBottomColor: isDarkMode ? colors.border_subtle : '#E6EBF0',
+                  borderBottomWidth: 1,
+                }}
+              >
+                <Text style={{ color: isDarkMode ? colors.text_primary : '#1A1A2E', fontWeight: selectedKey === item.key ? '600' : '400' }}>
+                  {item.title}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// 🎯 APP CONTENT - Componente principal de contenido
+function AppContent({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean; setIsDarkMode: (value: boolean) => void }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.3)).current;
+  const blurAnim = useRef(new Animated.Value(100)).current;
+  const [blurValue, setBlurValue] = useState(100);
+  const bgColorAnim = useRef(new Animated.Value(0)).current;
+  const [bgColorValue, setBgColorValue] = useState(0);
+  const fadeOutAnim = useRef(new Animated.Value(0)).current;
+  const [fadeOutValue, setFadeOutValue] = useState(0);
   const notificationListener = useRef<any>();
   const responseListener = useRef<any>();
+
+  useEffect(() => {
+    const id = blurAnim.addListener(({ value }) => {
+      setBlurValue(value);
+    });
+    const idBgColor = bgColorAnim.addListener(({ value }) => {
+      setBgColorValue(value);
+    });
+    const idFadeOut = fadeOutAnim.addListener(({ value }) => {
+      setFadeOutValue(value);
+    });
+    
+    // Primero: animar blur y cambiar fondo de blanco a violeta por 2 segundos
+    Animated.parallel([
+      Animated.timing(blurAnim, {
+        toValue: 0,
+        duration: 2000,
+        useNativeDriver: false,
+      }),
+      Animated.timing(bgColorAnim, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: false,
+      })
+    ]).start(() => {
+      // Mantener violeta por 2 segundos más (total 4 segundos de violeta)
+      setTimeout(() => {
+        // Luego: transición a blanco por 1 segundo
+        Animated.timing(fadeOutAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: false,
+        }).start(() => {
+          setShowSplash(false);
+          checkAuth();  // Verificar autenticación después del splash
+        });
+      }, 2000);
+    });
+    
+    return () => {
+      blurAnim.removeListener(id);
+      bgColorAnim.removeListener(idBgColor);
+      fadeOutAnim.removeListener(idFadeOut);
+    };
+  }, []);
   
   // 🔔 Mutación para guardar el push token
   const [updatePushToken] = useMutation(UPDATE_PUSH_TOKEN);
@@ -5337,33 +6278,18 @@ function AppContent() {
   });
 
   useEffect(() => {
-    // Animación del splash
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 10,
-        friction: 2,
-        useNativeDriver: true,
-      })
-    ]).start();
-
-    // Después de 2.5 segundos, fade out y cargar app
-    setTimeout(() => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }).start(() => {
-        setShowSplash(false);
-        checkAuth();
-      });
-    }, 2500);
+    // (Eliminado: animación fade/scale, solo blur)
   }, []);
+
+  const toggleDarkMode = async (): Promise<void> => {
+    try {
+      const newValue = !isDarkMode;
+      setIsDarkMode(newValue);
+      await AsyncStorage.setItem('isDarkMode', JSON.stringify(newValue));
+    } catch (error) {
+      console.error('Error guardando preferencia de tema:', error);
+    }
+  };
 
   // 🔔 useEffect para manejar notificaciones entrantes
   useEffect(() => {
@@ -5462,7 +6388,7 @@ function AppContent() {
           name: 'default',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#00BFA5',
+          lightColor: '#764BA2',
         });
       }
     } catch (error) {
@@ -5472,33 +6398,69 @@ function AppContent() {
 
   // Mostrar splash screen
   if (showSplash) {
+    // Interpolar color de blanco a violeta
+    const bgColor = bgColorValue === 0 ? '#FFFFFF' : bgColorValue === 1 ? '#764BA2' : 
+      `rgba(118, 75, 162, ${bgColorValue})`;
+    
     return (
-      <View style={{ 
+      <Animated.View style={{ 
         flex: 1, 
-        backgroundColor: '#FFFFFF',
+        backgroundColor: bgColor,
         justifyContent: 'center', 
-        alignItems: 'center' 
+        alignItems: 'center'
       }}>
-        <Animated.View style={{
-          opacity: fadeAnim,
-          alignItems: 'center'
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: '#FFFFFF',
+          opacity: fadeOutValue
+        }} />
+        <View style={{ 
+          flex: 1, 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          zIndex: 1
         }}>
-          {/* Logo de Teresa - minimalista */}
-          <TeresaLogo size={80} />
-          
-          <Text style={{
-            marginTop: 16,
-            fontSize: 12,
-            color: '#718096',
-            fontStyle: 'italic',
-            letterSpacing: 0.5
-          }}>
-            Conexión Familiar
-          </Text>
+        {/* Letras aparecen con blur animado */}
+        {blurValue <= 100 && (
+          <View style={{ alignItems: 'center', gap: 8 }}>
+            <Text style={{
+              fontSize: 38,
+              fontWeight: '300',
+              color: '#FFFFFF',
+              letterSpacing: 16,
+              fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+              textTransform: 'uppercase',
+              textShadowColor: 'rgba(0, 0, 0, 0.1)',
+              textShadowOffset: { width: 0, height: 2 },
+              textShadowRadius: blurValue > 0 ? blurValue / 10 : 0
+            }}>
+              DHORA
+            </Text>
+            <Text style={{
+              fontSize: 12,
+              fontWeight: '300',
+              color: '#FFFFFF',
+              letterSpacing: 2,
+              fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+              textShadowColor: 'rgba(0, 0, 0, 0.1)',
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 2,
+              opacity: 0.9
+            }}>
+              Conexión Familiar
+            </Text>
+          </View>
+        )}
+        </View>
         </Animated.View>
-      </View>
     );
   }
+
+  
 
   if (loading) {
     return (
@@ -5508,19 +6470,38 @@ function AppContent() {
     );
   }
 
-  return isAuthenticated ? <HomeScreen onLogout={handleLogout} /> : <LoginScreen onLogin={handleLogin} />;
+  return isAuthenticated ? <HomeScreen onLogout={handleLogout} isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} /> : <LoginScreen onLogin={handleLogin} />;
 }
 
 // 🎨 APP PRINCIPAL
 export default function App() {
+  const [isDarkMode, setIsDarkMode] = React.useState(false);
+
+  React.useEffect(() => {
+    loadThemePreference();
+  }, []);
+
+  const loadThemePreference = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('isDarkMode');
+      if (saved !== null) {
+        setIsDarkMode(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Error cargando preferencia de tema:', error);
+    }
+  };
+
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <IconRegistry icons={EvaIconsPack} />
-      <ApplicationProvider {...eva} theme={customTheme}>
+      <ApplicationProvider {...eva} theme={isDarkMode ? darkTheme : customTheme}>
+        
         <ApolloProvider client={apolloClient}>
-          <AppContent />
+       
+          <AppContent isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
         </ApolloProvider>
       </ApplicationProvider>
-    </>
+    </GestureHandlerRootView>
   );
 }

@@ -5,7 +5,7 @@ interface TeresaLogoIconProps {
   size?: number;
 }
 
-export default function TeresaLogoIcon({ size = 42 }: TeresaLogoIconProps) {
+export default function TeresaLogoIcon({ size = 56 }: TeresaLogoIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100" fill="none">
       <Defs>
