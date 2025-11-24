@@ -1,12 +1,12 @@
 {
   "expo": {
     "name": "Dhora",
-    "slug": "movilDhora",
+    "slug": "movilTeresa",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "resizeMode": "cover",
       "backgroundColor": "#764BA2"
