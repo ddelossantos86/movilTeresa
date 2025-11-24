@@ -4,24 +4,16 @@ import { onError } from '@apollo/client/link/error';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Observable } from '@apollo/client';
+import Constants from 'expo-constants';
 
 // ========================================
 // CONFIGURACIÓN DINÁMICA DE API
 // ========================================
-// NOTA: Cambiar según el entorno
-// - Desarrollo local: localhost
-// - Cloud/Producción: actualizar según deploy
-// ========================================
-const API_HOST = '192.168.68.103'; // ← IP local actual
-const API_PORT = 3000;
-const API_PROTOCOL = 'http';
+// Obtener configuración desde variables de entorno o usar valores por defecto
+const API_URL = Constants.expoConfig?.extra?.apiUrl || 
+                process.env.EXPO_PUBLIC_GRAPHQL_URL ||
+                'http://149.50.150.151:3001/graphql';
 
-// En Android, si usas 10.0.2.2, descomenta:
-// const API_HOST = '10.0.2.2';
-
-const API_URL = `${API_PROTOCOL}://${API_HOST}:${API_PORT}/graphql`;
-
-console.log('🌐 Entorno: DESARROLLO');
 console.log('🌐 API_URL configurada:', API_URL);
 console.log('📱 Platform:', Platform.OS);
 
