@@ -50,7 +50,16 @@
       "apiUrl": "http://149.50.150.151:3000/graphql"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "networkSecurityConfig": "./network-security-config.xml"
+          }
+        }
+      ]
     ]
   }
 }
