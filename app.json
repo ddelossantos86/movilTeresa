@@ -47,7 +47,7 @@
       "eas": {
         "projectId": "7e633068-2cc0-46ee-8290-f5044777c33a"
       },
-      "apiUrl": "http://149.50.150.151:3000/graphql"
+      "apiUrl": "http://149.50.150.151:3090/graphql"
     },
     "plugins": [
       "expo-secure-store",
