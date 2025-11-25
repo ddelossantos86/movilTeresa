@@ -16,7 +16,8 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu galería de fotos para guardar las imágenes descargadas de los mensajes.",
         "NSPhotoLibraryAddUsageDescription": "Necesitamos permiso para guardar imágenes en tu galería de fotos.",
-        "NSCameraUsageDescription": "Cámara"
+        "NSCameraUsageDescription": "Cámara",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

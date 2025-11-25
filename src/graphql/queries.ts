@@ -24,6 +24,8 @@ export const GET_MENSAJES_TUTOR = gql`
       contenido
       tipo
       alcance
+      gradoNombre
+      divisionNombre
       estado
       autorNombre
       publicadoEn
@@ -75,6 +77,8 @@ export const GET_ALUMNOS_TUTOR = gql`
       nombre
       apellido
       nivel
+      grado
+      division
       fechaNacimiento
       condicionesEspeciales
       observacionesCondiciones

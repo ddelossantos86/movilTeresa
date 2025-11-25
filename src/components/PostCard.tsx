@@ -26,7 +26,7 @@ interface PostCardProps {
   alumnoNombre?: string;
   alumnoApellido?: string;
   alcance?: string;
-  tipoMensaje?: 'GENERAL' | 'ACADEMICO' | 'ADMINISTRATIVO' | 'EVENTO' | 'CONSULTA_TUTOR' | 'NOTA';
+  tipoMensaje?: 'GENERAL' | 'ACADEMICO' | 'ADMINISTRATIVO' | 'EVENTO' | 'CONSULTA_TUTOR' | 'NOTA' | 'ANUNCIO_GENERAL';
   tipo?: 'MENSAJE' | 'ASISTENCIA' | 'EVALUACION' | 'SEGUIMIENTO';
   totalReacciones?: number;
   miReaccion?: boolean;

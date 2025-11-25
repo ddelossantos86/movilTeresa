@@ -10,12 +10,15 @@ import Constants from 'expo-constants';
 // CONFIGURACIÓN DINÁMICA DE API
 // ========================================
 // Obtener configuración desde variables de entorno o usar valores por defecto
-const API_URL = Constants.expoConfig?.extra?.apiUrl || 
-                process.env.EXPO_PUBLIC_GRAPHQL_URL ||
-                'http://149.50.150.151:3001/graphql';
+// PRIORIDAD: 1. Variables de entorno (.env) 2. app.json extra.apiUrl 3. Fallback producción
+const API_URL = process.env.EXPO_PUBLIC_GRAPHQL_URL ||
+                Constants.expoConfig?.extra?.apiUrl || 
+                'http://149.50.150.151:3090/graphql';
 
 console.log('🌐 API_URL configurada:', API_URL);
 console.log('📱 Platform:', Platform.OS);
+console.log('🔧 EXPO_PUBLIC_GRAPHQL_URL:', process.env.EXPO_PUBLIC_GRAPHQL_URL);
+console.log('🔧 app.json apiUrl:', Constants.expoConfig?.extra?.apiUrl);
 
 const httpLink = createHttpLink({
   uri: API_URL,
